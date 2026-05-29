@@ -590,4 +590,4 @@ const PokerGamePage: React.FC = () => {
   );
 };
 
-export default PokerGame;
+export default PokerGamePage;
