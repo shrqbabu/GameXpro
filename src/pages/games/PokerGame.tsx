@@ -113,7 +113,7 @@ const PokerGamePage: React.FC = () => {
     setLeaving(true);
     try {
       await leavePokerTable(tableId, user.uid);
-      navigate('/poker');
+      navigate('/games/poker');
     } catch (e: any) {
       setError(e.message || 'Failed to leave');
       setLeaving(false);
@@ -153,7 +153,7 @@ const PokerGamePage: React.FC = () => {
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
         <div className="text-center">
           <p className="text-white text-xl mb-4">Table not found</p>
-          <button onClick={() => navigate('/poker')}
+          <button onClick={() => navigate('/games/poker')}
             className="text-purple-400 hover:text-purple-300 flex items-center gap-2 mx-auto">
             <ArrowLeft className="w-4 h-4" /> Back to Lobby
           </button>
