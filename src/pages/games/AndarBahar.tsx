@@ -1,338 +1,657 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { deductFunds, addFunds } from '../../firebase/wallet';
-import toast from 'react-hot-toast';
+// src/pages/AndarBaharPage.tsx
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useAuth } from '../context/AuthContext';
+import {
+  createAndarBaharRound,
+  getActiveAndarBaharGame,
+  subscribeAndarBahar,
+  placeAndarBaharBet,
+  dealAndarBahar,
+  AndarBaharGame,
+  ABBet,
+} from '../firebase/games';
+import CardDisplay from '../components/games/CardDisplay';
+import GameTimer from '../components/games/GameTimer';
+import { formatCurrency, calculateUsableBalance } from '../utils/helpers';
+import {
+  Users, ChevronRight, History, TrendingUp,
+  Loader2, AlertCircle, CheckCircle, Coins,
+  Zap, RotateCcw,
+} from 'lucide-react';
 
-type ABSide = 'ANDAR' | 'BAHAR';
-type GamePhase = 'BETTING' | 'DEALING' | 'RESULT';
+const BET_CHIPS = [10, 50, 100, 500, 1000];
+const NEXT_ROUND_DELAY = 6000; // 6 seconds before next round
 
-const SUITS = ['♠', '♥', '♦', '♣'];
-const VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-const BET_AMOUNTS = [10, 50, 100, 500, 1000];
-
-function randomCard() {
-  const v = VALUES[Math.floor(Math.random() * VALUES.length)];
-  const s = SUITS[Math.floor(Math.random() * SUITS.length)];
-  return { value: v, suit: s };
+// ─────────────────────────────────────────────────────
+// History Entry
+// ─────────────────────────────────────────────────────
+interface HistoryEntry {
+  winner: 'andar' | 'bahar';
+  roundNumber: number;
 }
 
-function CardMini({ card, isRed }: { card: { value: string; suit: string }; isRed: boolean }) {
-  return (
-    <div className="ab-card" style={{ borderColor: isRed ? 'rgba(248,113,113,0.6)' : 'rgba(226,232,240,0.3)' }}>
-      <span style={{ color: isRed ? '#f87171' : '#e2e8f0', fontFamily: "'Cinzel',serif", fontSize: 11, fontWeight: 700 }}>{card.value}</span>
-      <span style={{ color: isRed ? '#f87171' : '#e2e8f0', fontSize: 16 }}>{card.suit}</span>
-    </div>
-  );
-}
+// ─────────────────────────────────────────────────────
+// AndarBaharPage
+// ─────────────────────────────────────────────────────
 
-export function AndarBahar() {
-  const navigate = useNavigate();
+const AndarBaharPage: React.FC = () => {
   const { user, wallet } = useAuth();
-  const [phase, setPhase] = useState<GamePhase>('BETTING');
+
+  const [gameId, setGameId] = useState<string | null>(null);
+  const [game, setGame] = useState<AndarBaharGame | null>(null);
+  const [loading, setLoading] = useState(true);
   const [betAmount, setBetAmount] = useState(50);
-  const [customBet, setCustomBet] = useState('');
-  const [choice, setChoice] = useState<ABSide | null>(null);
-  const [jokerCard, setJokerCard] = useState<any>(null);
-  const [andarCards, setAndarCards] = useState<any[]>([]);
-  const [baharCards, setBaharCards] = useState<any[]>([]);
-  const [winner, setWinner] = useState<ABSide | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [resultMsg, setResultMsg] = useState('');
-  const [history, setHistory] = useState<ABSide[]>([]);
+  const [placing, setPlacing] = useState(false);
   const [dealing, setDealing] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [nextRoundCountdown, setNextRoundCountdown] = useState<number | null>(null);
 
-  const effectiveBet = customBet ? parseInt(customBet) || 0 : betAmount;
-  const balance = wallet?.totalBalance ?? 0;
+  const isDealing = useRef(false);
+  const nextRoundTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const simulateDeal = (joker: { value: string }, onDone: (side: ABSide) => void) => {
-    let andar: any[] = [];
-    let bahar: any[] = [];
-    let turn: ABSide = 'ANDAR';
-    let maxRounds = 26;
-    let round = 0;
-
-    const dealNext = () => {
-      if (round >= maxRounds) { onDone('BAHAR'); return; }
-      const c = randomCard();
-      const isMatch = c.value === joker.value;
-
-      if (turn === 'ANDAR') {
-        andar = [...andar, c];
-        setAndarCards([...andar]);
-      } else {
-        bahar = [...bahar, c];
-        setBaharCards([...bahar]);
-      }
-
-      if (isMatch) {
-        onDone(turn);
-        return;
-      }
-      turn = turn === 'ANDAR' ? 'BAHAR' : 'ANDAR';
-      round++;
-      setTimeout(dealNext, 320);
-    };
-    setTimeout(dealNext, 400);
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
   };
 
-  const handlePlaceBet = async () => {
-    if (!choice) return toast.error('Andar ya Bahar chuniye');
-    if (effectiveBet < 10) return toast.error('Minimum bet ₹10 hai');
-    if (!wallet || wallet.totalBalance < effectiveBet) return toast.error('Insufficient balance');
-    if (!user) return;
-
+  // ── Init Game ──────────────────────────────────────
+  const initGame = useCallback(async () => {
     setLoading(true);
     try {
-      await deductFunds(user.uid, effectiveBet, 'GAME_LOSS', `Andar Bahar bet - ${choice}`);
-      setPhase('DEALING');
-      setDealing(true);
-      setAndarCards([]);
-      setBaharCards([]);
-      setWinner(null);
-
-      const jk = randomCard();
-      setJokerCard(jk);
-
-      simulateDeal(jk, async (w) => {
-        setWinner(w);
-        setHistory(h => [w, ...h.slice(0, 19)]);
-        const won = choice === w;
-        if (won) {
-          const payout = Math.floor(effectiveBet * 1.9);
-          await addFunds(user.uid, payout, 'winningBalance', `Andar Bahar win - ${choice}`);
-          setResultMsg(`🎉 ${w} mein aaya! +₹${payout - effectiveBet} profit`);
-          toast.success(`Aap jeete! ₹${payout} mila`);
-        } else {
-          setResultMsg(`💔 ${w} mein aaya. Haare ₹${effectiveBet}`);
-          toast.error(`${w} mein aaya`);
-        }
-        setDealing(false);
-        setLoading(false);
-        setPhase('RESULT');
-      });
+      let id = await getActiveAndarBaharGame();
+      if (!id) {
+        id = await createAndarBaharRound();
+      }
+      setGameId(id);
     } catch (e: any) {
-      toast.error(e.message || 'Error');
+      showToast(e.message || 'Failed to load game', 'error');
+    } finally {
       setLoading(false);
-      setPhase('BETTING');
+    }
+  }, []);
+
+  useEffect(() => {
+    initGame();
+    return () => {
+      if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+      if (countdownInterval.current) clearInterval(countdownInterval.current);
+    };
+  }, [initGame]);
+
+  // ── Subscribe to game ──────────────────────────────
+  useEffect(() => {
+    if (!gameId) return;
+    const unsub = subscribeAndarBahar(gameId, (data) => {
+      setGame(data);
+
+      if (data.status === 'result' && !isDealing.current) {
+        // Add to history
+        if (data.winner) {
+          setHistory((prev) => [
+            { winner: data.winner!, roundNumber: data.roundNumber },
+            ...prev.slice(0, 19),
+          ]);
+        }
+
+        // Start next round countdown
+        let secs = Math.ceil(NEXT_ROUND_DELAY / 1000);
+        setNextRoundCountdown(secs);
+        if (countdownInterval.current) clearInterval(countdownInterval.current);
+        countdownInterval.current = setInterval(() => {
+          secs--;
+          setNextRoundCountdown(secs);
+          if (secs <= 0) {
+            clearInterval(countdownInterval.current!);
+            setNextRoundCountdown(null);
+          }
+        }, 1000);
+
+        // Schedule next round
+        if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+        nextRoundTimer.current = setTimeout(async () => {
+          isDealing.current = false;
+          const newId = await createAndarBaharRound();
+          setGameId(newId);
+          setGame(null);
+        }, NEXT_ROUND_DELAY);
+      }
+    });
+    return () => unsub();
+  }, [gameId]);
+
+  // ── Timer expired → deal ──────────────────────────
+  const handleTimerExpire = useCallback(async () => {
+    if (!gameId || isDealing.current) return;
+    isDealing.current = true;
+    setDealing(true);
+    try {
+      await dealAndarBahar(gameId);
+    } catch (e: any) {
+      showToast(e.message || 'Deal failed', 'error');
+      isDealing.current = false;
+    } finally {
+      setDealing(false);
+    }
+  }, [gameId]);
+
+  // ── Place Bet ──────────────────────────────────────
+  const handleBet = async (side: 'andar' | 'bahar') => {
+    if (!user || !gameId) return;
+    if (!wallet) { showToast('Wallet not loaded', 'error'); return; }
+    if (game?.status !== 'betting') { showToast('Betting is closed', 'error'); return; }
+
+    const myBet = game?.bets?.find((b) => b.uid === user.uid);
+    if (myBet) { showToast('Already placed a bet this round', 'error'); return; }
+
+    const usable = calculateUsableBalance(wallet);
+    if (usable < betAmount) { showToast('Insufficient balance', 'error'); return; }
+
+    setPlacing(true);
+    try {
+      await placeAndarBaharBet(gameId, user.uid, user.name || 'Player', betAmount, side);
+      showToast(
+        `✅ ₹${betAmount} on ${side === 'andar' ? '🔵 ANDAR' : '🔴 BAHAR'}`,
+        'success'
+      );
+    } catch (e: any) {
+      showToast(e.message || 'Bet failed', 'error');
+    } finally {
+      setPlacing(false);
     }
   };
 
-  const handleReset = () => {
-    setPhase('BETTING');
-    setChoice(null);
-    setJokerCard(null);
-    setAndarCards([]);
-    setBaharCards([]);
-    setWinner(null);
-    setResultMsg('');
-    setDealing(false);
-  };
+  const myBet = game?.bets?.find((b) => b.uid === user?.uid);
+  const usableBalance = wallet ? calculateUsableBalance(wallet) : 0;
+
+  // ─────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent
+            rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-400">Loading Andar Bahar...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="ab-root">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Raleway:wght@300;400;500&display=swap');
-        .ab-root{min-height:100vh;background:radial-gradient(ellipse at top,#1a0533 0%,#0d0020 60%,#000 100%);font-family:'Raleway',sans-serif;color:#e2e8f0;padding-bottom:40px;}
-        .ab-header{display:flex;align-items:center;gap:12px;padding:20px 24px;border-bottom:1px solid rgba(220,180,255,0.2);background:rgba(0,0,0,0.4);backdrop-filter:blur(10px);position:sticky;top:0;z-index:10;}
-        .ab-back{background:none;border:1px solid rgba(220,180,255,0.3);color:#c084fc;padding:8px 16px;border-radius:8px;cursor:pointer;font-family:'Raleway',sans-serif;font-size:13px;transition:all 0.2s;}
-        .ab-back:hover{background:rgba(220,180,255,0.1);}
-        .ab-title{font-family:'Cinzel',serif;font-size:20px;font-weight:800;background:linear-gradient(135deg,#c084fc,#e879f9,#c084fc);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:2px;}
-        .ab-balance{margin-left:auto;background:rgba(192,132,252,0.1);border:1px solid rgba(192,132,252,0.3);padding:6px 14px;border-radius:20px;font-size:13px;color:#c084fc;font-weight:500;}
-        .ab-table{max-width:700px;margin:28px auto 0;padding:0 16px;}
-        .ab-felt{background:radial-gradient(ellipse,#1a0040 0%,#0d001f 60%,#06000f 100%);border:3px solid rgba(192,132,252,0.6);border-radius:24px;padding:28px 20px;position:relative;box-shadow:0 0 60px rgba(192,132,252,0.12),inset 0 0 40px rgba(0,0,0,0.6);}
-        .ab-felt::before{content:'';position:absolute;inset:6px;border:1px solid rgba(192,132,252,0.15);border-radius:18px;pointer-events:none;}
+    <div className="min-h-screen bg-gray-950 text-white">
+      {/* ── Toast ───────────────────────────────────── */}
+      {toast && (
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50
+          flex items-center gap-2 px-5 py-3 rounded-2xl shadow-2xl
+          border text-sm font-medium animate-[slideDown_0.3s_ease-out]
+          ${toast.type === 'success'
+            ? 'bg-emerald-900/95 border-emerald-500/50 text-emerald-300'
+            : 'bg-red-900/95 border-red-500/50 text-red-300'
+          }`}>
+          {toast.type === 'success'
+            ? <CheckCircle className="w-4 h-4" />
+            : <AlertCircle className="w-4 h-4" />}
+          {toast.msg}
+        </div>
+      )}
 
-        /* Joker card */
-        .joker-section{text-align:center;margin-bottom:24px;}
-        .joker-label{font-family:'Cinzel',serif;font-size:10px;letter-spacing:3px;color:rgba(192,132,252,0.7);text-transform:uppercase;margin-bottom:10px;}
-        .joker-card-big{width:72px;height:100px;margin:0 auto;background:linear-gradient(135deg,#fffef5,#f8f4e8);border:3px solid #c084fc;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 0 30px rgba(192,132,252,0.5);position:relative;}
-        .joker-glow{animation:jokerGlow 1.5s ease-in-out infinite alternate;}
-        @keyframes jokerGlow{from{box-shadow:0 0 20px rgba(192,132,252,0.4)}to{box-shadow:0 0 40px rgba(192,132,252,0.9)}}
-        .joker-val{font-family:'Cinzel',serif;font-size:22px;font-weight:800;}
-        .joker-suit{font-size:20px;}
-        .joker-placeholder{width:72px;height:100px;margin:0 auto;border:2px dashed rgba(192,132,252,0.3);border-radius:10px;display:flex;align-items:center;justify-content:center;color:rgba(192,132,252,0.3);font-size:24px;}
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        {/* ── Header ──────────────────────────────────── */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-black text-white flex items-center gap-2">
+              🃏 Andar Bahar
+            </h1>
+            <p className="text-gray-500 text-sm mt-0.5">
+              Real-time multiplayer • Place bet before timer ends
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="bg-gray-900 border border-gray-700 rounded-xl px-4 py-2">
+              <p className="text-gray-500 text-xs">Balance</p>
+              <p className="text-yellow-400 font-bold">{formatCurrency(usableBalance)}</p>
+            </div>
+          </div>
+        </div>
 
-        /* Two sides */
-        .ab-sides{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px;}
-        .ab-side{border-radius:16px;padding:16px 12px;min-height:180px;}
-        .ab-side.andar-side{background:rgba(34,197,94,0.05);border:2px solid ${phase === 'RESULT' && winner === 'ANDAR' ? '#22c55e' : 'rgba(34,197,94,0.25)'};}
-        .ab-side.bahar-side{background:rgba(239,68,68,0.05);border:2px solid ${phase === 'RESULT' && winner === 'BAHAR' ? '#ef4444' : 'rgba(239,68,68,0.25)'};}
-        .ab-side.winner-andar{border-color:#22c55e;box-shadow:0 0 30px rgba(34,197,94,0.3);}
-        .ab-side.winner-bahar{border-color:#ef4444;box-shadow:0 0 30px rgba(239,68,68,0.3);}
-        .side-title{font-family:'Cinzel',serif;font-size:16px;font-weight:800;text-align:center;margin-bottom:12px;letter-spacing:2px;}
-        .andar-title{color:#22c55e;}
-        .bahar-title{color:#ef4444;}
-        .cards-grid{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;}
-        .ab-card{width:32px;height:44px;background:linear-gradient(135deg,#f8f4e8,#fffef5);border:1.5px solid;border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;animation:cardAppear 0.3s ease-out;}
-        @keyframes cardAppear{from{opacity:0;transform:scale(0.7) rotate(-10deg)}to{opacity:1;transform:scale(1) rotate(0)}}
-        .empty-side{display:flex;align-items:center;justify-content:center;height:80px;color:rgba(255,255,255,0.15);font-size:12px;font-family:'Cinzel',serif;letter-spacing:1px;}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* ── LEFT: Game Board ─────────────────────── */}
+          <div className="lg:col-span-2 space-y-4">
 
-        /* Bet section */
-        .ab-bet-choices{display:flex;gap:12px;justify-content:center;margin-bottom:20px;}
-        .ab-choice-btn{flex:1;max-width:200px;padding:16px;border-radius:14px;border:2px solid transparent;cursor:pointer;font-family:'Cinzel',serif;font-size:18px;font-weight:800;letter-spacing:2px;transition:all 0.2s;background:rgba(0,0,0,0.4);}
-        .ab-choice-btn.andar-btn{border-color:rgba(34,197,94,0.4);color:#22c55e;}
-        .ab-choice-btn.andar-btn:hover,.ab-choice-btn.andar-btn.sel{background:rgba(34,197,94,0.15);border-color:#22c55e;box-shadow:0 0 25px rgba(34,197,94,0.3);transform:scale(1.03);}
-        .ab-choice-btn.bahar-btn{border-color:rgba(239,68,68,0.4);color:#ef4444;}
-        .ab-choice-btn.bahar-btn:hover,.ab-choice-btn.bahar-btn.sel{background:rgba(239,68,68,0.15);border-color:#ef4444;box-shadow:0 0 25px rgba(239,68,68,0.3);transform:scale(1.03);}
-        .ab-choice-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none;}
-        .ab-payout-sub{font-size:10px;opacity:0.65;margin-top:3px;letter-spacing:1px;}
-
-        .chip-row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:14px;}
-        .chip{width:46px;height:46px;border-radius:50%;border:3px solid;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;transition:all 0.2s;}
-        .chip:hover,.chip.active{transform:scale(1.12) translateY(-3px);}
-        .chip:disabled{opacity:0.4;cursor:not-allowed;transform:none;}
-        .chip-10{background:radial-gradient(circle,#dc2626,#991b1b);border-color:#ef4444;color:#fff;}
-        .chip-50{background:radial-gradient(circle,#1d4ed8,#1e3a8a);border-color:#3b82f6;color:#fff;}
-        .chip-100{background:radial-gradient(circle,#15803d,#14532d);border-color:#22c55e;color:#fff;}
-        .chip-500{background:radial-gradient(circle,#7c3aed,#4c1d95);border-color:#8b5cf6;color:#fff;}
-        .chip-1000{background:radial-gradient(circle,#d4af37,#92710a);border-color:#f5e070;color:#000;}
-
-        .bet-display{text-align:center;margin-bottom:12px;}
-        .bet-display-label{font-size:11px;color:rgba(192,132,252,0.6);letter-spacing:2px;text-transform:uppercase;}
-        .bet-display-amount{font-family:'Cinzel',serif;font-size:24px;font-weight:800;color:#c084fc;}
-        .custom-bet{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:18px;}
-        .custom-bet input{background:rgba(255,255,255,0.05);border:1px solid rgba(192,132,252,0.3);color:#e2e8f0;padding:7px 12px;border-radius:8px;font-family:'Raleway',sans-serif;font-size:14px;width:100px;text-align:center;outline:none;}
-        .custom-bet input:focus{border-color:#c084fc;}
-        .custom-bet-label{font-size:12px;color:rgba(192,132,252,0.6);}
-        .ab-place-btn{width:100%;padding:16px;border-radius:12px;border:none;background:linear-gradient(135deg,#a855f7,#c084fc,#a855f7);color:#fff;font-family:'Cinzel',serif;font-size:16px;font-weight:800;letter-spacing:2px;cursor:pointer;transition:all 0.2s;box-shadow:0 4px 20px rgba(168,85,247,0.4);}
-        .ab-place-btn:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(168,85,247,0.5);}
-        .ab-place-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none;}
-
-        .result-area{text-align:center;padding:16px 0;}
-        .result-text{font-family:'Cinzel',serif;font-size:20px;font-weight:800;margin-bottom:4px;}
-        .result-win{color:#22c55e;}
-        .result-lose{color:#ef4444;}
-        .result-sub{font-size:14px;color:rgba(226,232,240,0.6);margin-bottom:18px;}
-        .ab-play-again{background:rgba(192,132,252,0.1);border:2px solid #c084fc;color:#c084fc;padding:12px 32px;border-radius:10px;cursor:pointer;font-family:'Cinzel',serif;font-size:14px;transition:all 0.2s;}
-        .ab-play-again:hover{background:rgba(192,132,252,0.2);}
-
-        .dealing-ticker{text-align:center;color:#c084fc;font-family:'Cinzel',serif;font-size:13px;letter-spacing:2px;animation:pulse 0.8s infinite;margin-bottom:10px;}
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
-
-        .history-strip{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:16px;padding-top:14px;border-top:1px solid rgba(192,132,252,0.1);}
-        .hist-dot{width:26px;height:26px;border-radius:50%;font-family:'Cinzel',serif;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid;}
-        .hist-a{background:rgba(34,197,94,0.15);border-color:rgba(34,197,94,0.5);color:#22c55e;}
-        .hist-b{background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.5);color:#ef4444;}
-        .history-label{width:100%;text-align:center;font-size:10px;color:rgba(192,132,252,0.4);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;}
-      `}</style>
-
-      <div className="ab-header">
-        <button className="ab-back" onClick={() => navigate('/dashboard')}>← Back</button>
-        <span className="ab-title">🃏 Andar Bahar</span>
-        <span className="ab-balance">₹{balance.toLocaleString('en-IN')}</span>
-      </div>
-
-      <div className="ab-table">
-        <div className="ab-felt">
-          {/* Joker Card */}
-          <div className="joker-section">
-            <div className="joker-label">Joker Card</div>
-            {jokerCard ? (
-              <div className={`joker-card-big joker-glow`}>
-                <span className="joker-val" style={{ color: (jokerCard.suit === '♥' || jokerCard.suit === '♦') ? '#f87171' : '#1a1a2e' }}>
-                  {jokerCard.value}
-                </span>
-                <span className="joker-suit" style={{ color: (jokerCard.suit === '♥' || jokerCard.suit === '♦') ? '#f87171' : '#1a1a2e' }}>
-                  {jokerCard.suit}
+            {/* Status Bar */}
+            <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-4
+              flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={`w-2.5 h-2.5 rounded-full
+                  ${game?.status === 'betting' ? 'bg-emerald-400 animate-pulse' :
+                    game?.status === 'dealing' ? 'bg-amber-400 animate-pulse' :
+                    'bg-blue-400'}`} />
+                <span className="font-semibold text-sm">
+                  {game?.status === 'betting' && '🎲 Betting Open — Place your bets!'}
+                  {game?.status === 'dealing' && '🃏 Dealing cards...'}
+                  {game?.status === 'result' && (
+                    <span className={game.winner === 'andar' ? 'text-blue-400' : 'text-rose-400'}>
+                      🏆 {game.winner?.toUpperCase()} Wins!
+                    </span>
+                  )}
                 </span>
               </div>
-            ) : (
-              <div className="joker-placeholder">🃏</div>
+
+              {game?.status === 'betting' && game?.bettingEndsAt && (
+                <GameTimer
+                  endsAt={game.bettingEndsAt instanceof Date
+                    ? game.bettingEndsAt
+                    : game.bettingEndsAt?.toDate
+                    ? game.bettingEndsAt.toDate()
+                    : new Date(game.bettingEndsAt)}
+                  onExpire={handleTimerExpire}
+                />
+              )}
+
+              {game?.status === 'result' && nextRoundCountdown !== null && (
+                <div className="text-gray-400 text-sm">
+                  Next round in <span className="text-yellow-400 font-bold">
+                    {nextRoundCountdown}s
+                  </span>
+                </div>
+              )}
+
+              {game?.status === 'dealing' && (
+                <div className="flex items-center gap-2 text-amber-400">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span className="text-sm">Dealing...</span>
+                </div>
+              )}
+            </div>
+
+            {/* Main Table */}
+            <div className="bg-gradient-to-br from-emerald-950 via-green-900
+              to-emerald-950 border border-emerald-800/40 rounded-3xl p-6
+              shadow-2xl shadow-emerald-950/50 relative overflow-hidden">
+
+              {/* Felt texture overlay */}
+              <div className="absolute inset-0 opacity-5"
+                style={{
+                  backgroundImage: `radial-gradient(circle at 2px 2px, white 1px, transparent 0)`,
+                  backgroundSize: '24px 24px'
+                }} />
+
+              {/* Joker Card Section */}
+              <div className="relative text-center mb-6">
+                <div className="inline-block">
+                  <p className="text-emerald-300/60 text-xs uppercase tracking-widest mb-3
+                    font-semibold">
+                    ✦ Joker Card ✦
+                  </p>
+                  <div className="flex justify-center">
+                    {game?.jokerCard ? (
+                      <div className="relative">
+                        <div className="absolute -inset-2 bg-yellow-400/20 rounded-2xl
+                          blur-xl animate-pulse" />
+                        <CardDisplay card={game.jokerCard} size="lg" animate />
+                      </div>
+                    ) : (
+                      <div className="w-20 h-28 rounded-xl border-2 border-dashed
+                        border-emerald-600/40 flex items-center justify-center
+                        bg-emerald-900/20">
+                        <span className="text-emerald-600/40 text-4xl">?</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Andar & Bahar Areas */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Andar */}
+                <div className={`rounded-2xl p-4 border-2 transition-all duration-500
+                  min-h-[120px] relative overflow-hidden
+                  ${game?.winner === 'andar'
+                    ? 'border-yellow-400 bg-yellow-400/10 shadow-lg shadow-yellow-400/20'
+                    : myBet?.side === 'andar'
+                    ? 'border-blue-500 bg-blue-500/10'
+                    : 'border-emerald-700/30 bg-black/20'}`}>
+
+                  {game?.winner === 'andar' && (
+                    <div className="absolute inset-0 bg-yellow-400/5 animate-pulse" />
+                  )}
+
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-blue-500" />
+                      <span className="font-black text-lg text-blue-400">ANDAR</span>
+                    </div>
+                    <div className="flex gap-1 flex-wrap justify-end">
+                      {myBet?.side === 'andar' && (
+                        <span className="text-xs bg-blue-500/20 text-blue-300
+                          border border-blue-500/30 rounded-full px-2 py-0.5">
+                          Your Bet ₹{myBet.amount}
+                        </span>
+                      )}
+                      {game?.winner === 'andar' && (
+                        <span className="text-xs bg-yellow-500/20 text-yellow-300
+                          border border-yellow-500/30 rounded-full px-2 py-0.5">
+                          🏆 Winner
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1">
+                    {game?.andarCards?.map((card, i) => (
+                      <CardDisplay key={i} card={card} size="xs" animate />
+                    ))}
+                    {game?.status === 'dealing' && (
+                      <div className="w-8 h-11 rounded-lg bg-blue-500/10
+                        border border-blue-500/20 animate-pulse" />
+                    )}
+                  </div>
+
+                  <div className="mt-2 text-xs text-emerald-600">
+                    {game?.andarCards?.length || 0} cards
+                  </div>
+                </div>
+
+                {/* Bahar */}
+                <div className={`rounded-2xl p-4 border-2 transition-all duration-500
+                  min-h-[120px] relative overflow-hidden
+                  ${game?.winner === 'bahar'
+                    ? 'border-yellow-400 bg-yellow-400/10 shadow-lg shadow-yellow-400/20'
+                    : myBet?.side === 'bahar'
+                    ? 'border-rose-500 bg-rose-500/10'
+                    : 'border-emerald-700/30 bg-black/20'}`}>
+
+                  {game?.winner === 'bahar' && (
+                    <div className="absolute inset-0 bg-yellow-400/5 animate-pulse" />
+                  )}
+
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full bg-rose-500" />
+                      <span className="font-black text-lg text-rose-400">BAHAR</span>
+                    </div>
+                    <div className="flex gap-1 flex-wrap justify-end">
+                      {myBet?.side === 'bahar' && (
+                        <span className="text-xs bg-rose-500/20 text-rose-300
+                          border border-rose-500/30 rounded-full px-2 py-0.5">
+                          Your Bet ₹{myBet.amount}
+                        </span>
+                      )}
+                      {game?.winner === 'bahar' && (
+                        <span className="text-xs bg-yellow-500/20 text-yellow-300
+                          border border-yellow-500/30 rounded-full px-2 py-0.5">
+                          🏆 Winner
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1">
+                    {game?.baharCards?.map((card, i) => (
+                      <CardDisplay key={i} card={card} size="xs" animate />
+                    ))}
+                    {game?.status === 'dealing' && (
+                      <div className="w-8 h-11 rounded-lg bg-rose-500/10
+                        border border-rose-500/20 animate-pulse" />
+                    )}
+                  </div>
+
+                  <div className="mt-2 text-xs text-emerald-600">
+                    {game?.baharCards?.length || 0} cards
+                  </div>
+                </div>
+              </div>
+
+              {/* Pot */}
+              {(game?.pot || 0) > 0 && (
+                <div className="mt-4 text-center">
+                  <span className="text-xs text-emerald-500/60 uppercase tracking-wider">
+                    Total Pot
+                  </span>
+                  <p className="text-yellow-400 font-black text-xl">
+                    {formatCurrency(game?.pot || 0)}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Result Banner */}
+            {game?.status === 'result' && myBet && (
+              <div className={`rounded-2xl p-5 border-2 text-center
+                ${myBet.side === game.winner
+                  ? 'bg-emerald-900/40 border-emerald-500/50 shadow-lg shadow-emerald-500/20'
+                  : 'bg-red-900/40 border-red-500/50 shadow-lg shadow-red-500/20'}`}>
+                {myBet.side === game.winner ? (
+                  <>
+                    <p className="text-4xl mb-2">🎉</p>
+                    <p className="text-emerald-400 font-black text-2xl">You Won!</p>
+                    <p className="text-emerald-300 text-lg mt-1">
+                      +{formatCurrency(Math.floor(myBet.amount * 1.9))}
+                    </p>
+                    <p className="text-gray-500 text-sm mt-1">Credited to winning balance</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-4xl mb-2">😔</p>
+                    <p className="text-red-400 font-black text-2xl">Better luck next time</p>
+                    <p className="text-red-300 text-lg mt-1">
+                      -{formatCurrency(myBet.amount)}
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Bet Panel */}
+            {game?.status === 'betting' && (
+              <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-white flex items-center gap-2">
+                    <Coins className="w-4 h-4 text-yellow-400" />
+                    Place Your Bet
+                  </h3>
+                  {myBet && (
+                    <span className="text-xs bg-emerald-500/20 text-emerald-400
+                      border border-emerald-500/30 rounded-full px-3 py-1">
+                      ✓ Bet Placed
+                    </span>
+                  )}
+                </div>
+
+                {myBet ? (
+                  <div className="text-center py-6">
+                    <p className="text-gray-400 mb-3 text-sm">You're betting on:</p>
+                    <div className={`inline-flex items-center gap-3 px-6 py-3
+                      rounded-2xl border-2 font-black text-xl
+                      ${myBet.side === 'andar'
+                        ? 'bg-blue-500/10 border-blue-500/40 text-blue-400'
+                        : 'bg-rose-500/10 border-rose-500/40 text-rose-400'}`}>
+                      <div className={`w-4 h-4 rounded-full
+                        ${myBet.side === 'andar' ? 'bg-blue-500' : 'bg-rose-500'}`} />
+                      {myBet.side.toUpperCase()} — {formatCurrency(myBet.amount)}
+                    </div>
+                    <p className="text-gray-600 text-xs mt-3">
+                      Win: {formatCurrency(Math.floor(myBet.amount * 1.9))}
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Chip Selector */}
+                    <div className="mb-5">
+                      <p className="text-gray-400 text-xs mb-2 uppercase tracking-wider">
+                        Select chip value
+                      </p>
+                      <div className="flex gap-2 flex-wrap">
+                        {BET_CHIPS.map((chip) => (
+                          <button
+                            key={chip}
+                            onClick={() => setBetAmount(chip)}
+                            className={`relative flex-1 min-w-[60px] py-3 rounded-xl
+                              text-sm font-bold transition-all border-2
+                              ${betAmount === chip
+                                ? 'bg-yellow-500 border-yellow-400 text-gray-900 scale-105 shadow-lg shadow-yellow-500/30'
+                                : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
+                            ₹{chip >= 1000 ? `${chip / 1000}K` : chip}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Bet Buttons */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <button
+                        onClick={() => handleBet('andar')}
+                        disabled={placing || !user}
+                        className="group relative overflow-hidden bg-gradient-to-b
+                          from-blue-600 to-blue-800 border border-blue-500/50
+                          text-white font-black py-5 rounded-2xl
+                          hover:from-blue-500 hover:to-blue-700
+                          disabled:opacity-40 transition-all
+                          hover:shadow-lg hover:shadow-blue-500/30
+                          active:scale-95">
+                        <div className="absolute inset-0 bg-blue-400/10
+                          translate-y-full group-hover:translate-y-0 transition-transform" />
+                        <div className="relative">
+                          <div className="w-5 h-5 rounded-full bg-blue-300 mx-auto mb-2" />
+                          <div className="text-xl mb-1">ANDAR</div>
+                          <div className="text-blue-200 text-xs">
+                            Bet: {formatCurrency(betAmount)}
+                          </div>
+                          <div className="text-blue-300/70 text-xs">
+                            Win: {formatCurrency(Math.floor(betAmount * 1.9))}
+                          </div>
+                        </div>
+                      </button>
+
+                      <button
+                        onClick={() => handleBet('bahar')}
+                        disabled={placing || !user}
+                        className="group relative overflow-hidden bg-gradient-to-b
+                          from-rose-600 to-rose-800 border border-rose-500/50
+                          text-white font-black py-5 rounded-2xl
+                          hover:from-rose-500 hover:to-rose-700
+                          disabled:opacity-40 transition-all
+                          hover:shadow-lg hover:shadow-rose-500/30
+                          active:scale-95">
+                        <div className="absolute inset-0 bg-rose-400/10
+                          translate-y-full group-hover:translate-y-0 transition-transform" />
+                        <div className="relative">
+                          <div className="w-5 h-5 rounded-full bg-rose-300 mx-auto mb-2" />
+                          <div className="text-xl mb-1">BAHAR</div>
+                          <div className="text-rose-200 text-xs">
+                            Bet: {formatCurrency(betAmount)}
+                          </div>
+                          <div className="text-rose-300/70 text-xs">
+                            Win: {formatCurrency(Math.floor(betAmount * 1.9))}
+                          </div>
+                        </div>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
 
-          {/* Dealing animation ticker */}
-          {dealing && <div className="dealing-ticker">Cards deal ho rahi hain...</div>}
+          {/* ── RIGHT: Sidebar ───────────────────────── */}
+          <div className="space-y-4">
+            {/* Live Bets */}
+            <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-4">
+              <h3 className="font-bold text-white flex items-center gap-2 mb-3">
+                <Users className="w-4 h-4 text-emerald-400" />
+                Live Bets
+                <span className="ml-auto text-xs text-gray-500">
+                  {game?.bets?.length || 0} players
+                </span>
+              </h3>
 
-          {/* Two sides */}
-          <div className="ab-sides">
-            <div className={`ab-side andar-side ${winner === 'ANDAR' ? 'winner-andar' : ''}`}>
-              <div className="side-title andar-title">ANDAR</div>
-              {andarCards.length === 0
-                ? <div className="empty-side">Andar ki cards</div>
-                : <div className="cards-grid">
-                    {andarCards.map((c, i) => {
-                      const isRed = c.suit === '♥' || c.suit === '♦';
-                      return <CardMini key={i} card={c} isRed={isRed} />;
-                    })}
-                  </div>}
+              <div className="mb-2 flex items-center justify-between text-xs text-gray-600">
+                <span>Pot: <span className="text-yellow-400 font-bold">
+                  {formatCurrency(game?.pot || 0)}</span>
+                </span>
+              </div>
+
+              <div className="space-y-1.5 max-h-52 overflow-y-auto
+                scrollbar-thin scrollbar-track-gray-800 scrollbar-thumb-gray-700">
+                {!game?.bets?.length ? (
+                  <div className="text-center py-6 text-gray-700 text-sm">
+                    No bets placed yet
+                  </div>
+                ) : (
+                  game.bets.map((bet: ABBet, i) => (
+                    <div key={i} className="flex items-center justify-between
+                      bg-gray-800/60 rounded-xl px-3 py-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full
+                          ${bet.side === 'andar' ? 'bg-blue-500' : 'bg-rose-500'}`} />
+                        <span className="text-gray-300 truncate max-w-[80px]">
+                          {bet.name}
+                        </span>
+                      </div>
+                      <span className={`font-bold text-xs
+                        ${bet.side === 'andar' ? 'text-blue-400' : 'text-rose-400'}`}>
+                        {bet.side.toUpperCase()}
+                      </span>
+                      <span className="text-yellow-400 font-bold">
+                        ₹{bet.amount}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-            <div className={`ab-side bahar-side ${winner === 'BAHAR' ? 'winner-bahar' : ''}`}>
-              <div className="side-title bahar-title">BAHAR</div>
-              {baharCards.length === 0
-                ? <div className="empty-side">Bahar ki cards</div>
-                : <div className="cards-grid">
-                    {baharCards.map((c, i) => {
-                      const isRed = c.suit === '♥' || c.suit === '♦';
-                      return <CardMini key={i} card={c} isRed={isRed} />;
-                    })}
-                  </div>}
+
+            {/* History */}
+            <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-4">
+              <h3 className="font-bold text-white flex items-center gap-2 mb-3">
+                <History className="w-4 h-4 text-yellow-400" />
+                Round History
+              </h3>
+              {!history.length ? (
+                <div className="text-center py-6 text-gray-700 text-sm">
+                  No history yet
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {history.map((h, i) => (
+                    <span key={i} className={`text-xs font-bold px-2.5 py-1
+                      rounded-full border
+                      ${h.winner === 'andar'
+                        ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                        : 'bg-rose-500/10 text-rose-400 border-rose-500/20'}`}>
+                      {h.winner === 'andar' ? 'A' : 'B'}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Payout Info */}
+            <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-4">
+              <h3 className="font-bold text-white text-sm mb-3">Payout</h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-blue-400 font-bold">🔵 Andar</span>
+                  <span className="text-white font-bold">1.9x</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-rose-400 font-bold">🔴 Bahar</span>
+                  <span className="text-white font-bold">1.9x</span>
+                </div>
+                <div className="border-t border-gray-800 pt-2 text-gray-600">
+                  First card always goes to Bahar
+                </div>
+              </div>
             </div>
           </div>
-
-          {/* Result */}
-          {phase === 'RESULT' && (
-            <div className="result-area">
-              <div className={`result-text ${resultMsg.includes('🎉') ? 'result-win' : 'result-lose'}`}>
-                {resultMsg.includes('🎉') ? '🎉 Mubarak ho!' : '💔 Haaste rehna!'}
-              </div>
-              <div className="result-sub">{resultMsg}</div>
-              <button className="ab-play-again" onClick={handleReset}>Phir Khelo</button>
-            </div>
-          )}
-
-          {/* Betting phase */}
-          {phase === 'BETTING' && (
-            <>
-              <div className="ab-bet-choices">
-                <button className={`ab-choice-btn andar-btn ${choice === 'ANDAR' ? 'sel' : ''}`} onClick={() => setChoice('ANDAR')}>
-                  ANDAR<div className="ab-payout-sub">1.9x Payout</div>
-                </button>
-                <button className={`ab-choice-btn bahar-btn ${choice === 'BAHAR' ? 'sel' : ''}`} onClick={() => setChoice('BAHAR')}>
-                  BAHAR<div className="ab-payout-sub">1.9x Payout</div>
-                </button>
-              </div>
-
-              <div className="chip-row">
-                {BET_AMOUNTS.map(a => (
-                  <button key={a} className={`chip chip-${a} ${!customBet && betAmount === a ? 'active' : ''}`}
-                    onClick={() => { setBetAmount(a); setCustomBet(''); }}>
-                    {a >= 1000 ? '1K' : a}
-                  </button>
-                ))}
-              </div>
-
-              <div className="bet-display">
-                <div className="bet-display-label">Aapka Bet</div>
-                <div className="bet-display-amount">₹{effectiveBet.toLocaleString('en-IN')}</div>
-              </div>
-
-              <div className="custom-bet">
-                <span className="custom-bet-label">Custom:</span>
-                <input type="number" placeholder="Amount" value={customBet}
-                  onChange={e => setCustomBet(e.target.value)} min={10} />
-              </div>
-
-              <button className="ab-place-btn" onClick={handlePlaceBet} disabled={loading || !choice}>
-                {loading ? 'Processing...' : `BET LAGAO — ₹${effectiveBet}`}
-              </button>
-            </>
-          )}
-
-          {/* History */}
-          {history.length > 0 && (
-            <div className="history-strip">
-              <div className="history-label">Last Results</div>
-              {history.map((h, i) => (
-                <div key={i} className={`hist-dot ${h === 'ANDAR' ? 'hist-a' : 'hist-b'}`}>
-                  {h === 'ANDAR' ? 'A' : 'B'}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default AndarBaharPage;
