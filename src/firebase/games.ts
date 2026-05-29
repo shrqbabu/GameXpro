@@ -1252,7 +1252,7 @@ export const startPokerHand = async (tableId: string): Promise<void> => {
     p.isDealer = i === dealerSeat;
     p.isSmallBlind = i === (dealerSeat + 1) % players.length;
     p.isBigBlind = i === (dealerSeat + 2) % players.length;
-    p.handRank = undefined;
+    p.handRank = ''; =
   });
 
   // Deal 2 cards each
