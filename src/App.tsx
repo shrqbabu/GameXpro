@@ -6,10 +6,10 @@ import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute, AdminRoute, PublicRoute } from './components/ProtectedRoute';
 import { MainLayout } from './components/Layout/MainLayout';
 
-import { DragonTiger } from './pages/games/DragonTiger';
-import { AndarBahar } from './pages/games/AndarBahar';
-import { PokerGame } from './pages/games/PokerGame';
-import { PokerLobbyPage } from './pages/games/PokerLobbyPage';
+import { DragonTigerPage } from './pages/games/DragonTiger';
+import { AndarBaharPage } from './pages/games/AndarBahar';
+import { PokerGamePage } from './pages/games/PokerGame';
+import { PokerLobbyPage } from './pages/games/PokerLobby';
 
 
 
@@ -68,10 +68,10 @@ export default function App() {
                 <Route path="/game-room/:roomId" element={<GameRoom />} />
                 <Route path="/games/color-prediction" element={<ColorPrediction />} />
                 <Route path="/games/dice" element={<DiceGame />} />
-                <Route path="/games/dragon-tiger" element={<DragonTiger />} />
-                <Route path="/games/andar-bahar" element={<AndarBahar />} />
+                <Route path="/games/dragon-tiger" element={<DragonTigerPage />} />
+                <Route path="/games/andar-bahar" element={<AndarBaharPage />} />
                 <Route path="/games/poker" element={<PokerLobbyPage />} />
-                <Route path="/games/table-poker/:tableId" element={<PokerGame />} />
+                <Route path="/games/table-poker/:tableId" element={<PokerGamePage />} />
                 
                 {/* Admin routes */}
                 <Route element={<AdminRoute />}>
