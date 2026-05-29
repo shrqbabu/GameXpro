@@ -1,7 +1,7 @@
 // src/pages/PokerGamePage.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   subscribePokerTable,
   startPokerHand,
@@ -9,9 +9,9 @@ import {
   leavePokerTable,
   PokerTable,
   PokerPlayer,
-} from '../firebase/games';
-import CardDisplay from '../components/games/CardDisplay';
-import { formatCurrency, calculateUsableBalance } from '../utils/helpers';
+} from '../../firebase/games';
+import CardDisplay from '../../components/games/CardDisplay';
+import { formatCurrency, calculateUsableBalance } from '../../utils/helpers';
 import {
   ArrowLeft, Users, Loader2, Play, LogOut,
   ChevronDown, Zap, Trophy, AlertCircle,
