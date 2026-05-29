@@ -4,9 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users, Clock, X, Zap, Trophy, Loader2,
 } from 'lucide-react';
-import { collection, addDoc,  doc,
-  getDoc,
-  updateDoc query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { useAuth } from '../context/AuthContext';
 import {
