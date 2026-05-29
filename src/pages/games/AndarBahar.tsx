@@ -1,6 +1,6 @@
 // src/pages/AndarBaharPage.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   createAndarBaharRound,
   getActiveAndarBaharGame,
@@ -9,10 +9,10 @@ import {
   dealAndarBahar,
   AndarBaharGame,
   ABBet,
-} from '../firebase/games';
-import CardDisplay from '../components/games/CardDisplay';
-import GameTimer from '../components/games/GameTimer';
-import { formatCurrency, calculateUsableBalance } from '../utils/helpers';
+} from '../../firebase/games';
+import CardDisplay from '../../components/games/CardDisplay';
+import GameTimer from '../../components/games/GameTimer';
+import { formatCurrency, calculateUsableBalance } from '../../utils/helpers';
 import {
   Users, ChevronRight, History, TrendingUp,
   Loader2, AlertCircle, CheckCircle, Coins,
