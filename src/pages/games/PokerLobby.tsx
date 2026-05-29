@@ -79,7 +79,7 @@ const PokerLobbyPage: React.FC = () => {
         buyIn
       );
       setShowJoin(false);
-      navigate(`/game/poker/${selectedTable.id}`);
+      navigate(`/games/poker/${selectedTable.id}`);
     } catch (e: any) {
       setError(e.message || 'Failed to join');
     } finally {
@@ -123,7 +123,7 @@ const PokerLobbyPage: React.FC = () => {
         newTable.buyIn
       );
       setShowCreate(false);
-      navigate(`/game/poker/${tableId}`);
+      navigate(`/games/poker/${tableId}`);
     } catch (e: any) {
       setError(e.message || 'Failed to create table');
     } finally {
@@ -372,7 +372,7 @@ const PokerLobbyPage: React.FC = () => {
                     {/* Action Button */}
                     {isJoined ? (
                       <button
-                        onClick={() => navigate(`/game/poker/${table.id}`)}
+                        onClick={() => navigate(`/games/poker/${table.id}`)}
                         className="w-full bg-gradient-to-r from-purple-600 to-indigo-600
                           text-white font-bold py-2.5 rounded-xl hover:from-purple-500
                           hover:to-indigo-500 transition-all flex items-center
