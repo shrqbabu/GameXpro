@@ -9,6 +9,7 @@ import { MainLayout } from './components/Layout/MainLayout';
 import { DragonTiger } from './pages/games/DragonTiger';
 import { AndarBahar } from './pages/games/AndarBahar';
 import { PokerGame } from './pages/games/PokerGame';
+import { PokerLobbyPage } from './pages/games/PokerLobbyPage';
 
 
 
@@ -69,7 +70,9 @@ export default function App() {
                 <Route path="/games/dice" element={<DiceGame />} />
                 <Route path="/games/dragon-tiger" element={<DragonTiger />} />
                 <Route path="/games/andar-bahar" element={<AndarBahar />} />
-                <Route path="/games/poker" element={<PokerGame />} />
+                <Route path="/games/poker" element={<PokerLobbyPage />} />
+                <Route path="/games/table-poker/:tableId" element={<PokerGame />} />
+                
                 {/* Admin routes */}
                 <Route element={<AdminRoute />}>
                   <Route path="/admin" element={<AdminDashboard />} />
