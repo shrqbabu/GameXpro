@@ -72,7 +72,7 @@ export default function App() {
                 
                 <Route path="/games/andar-bahar" element={<ProtectedRoute><AndarBaharPage /></ProtectedRoute>} />
                 <Route path="/games/poker" element={<PokerLobbyPage />} />
-                <Route path="/games/poker:tableId" element={<PokerGamePage />} />
+                <Route path="/games/poker/:tableId" element={<PokerGamePage />} />
                 
                 {/* Admin routes */}
                 <Route element={<AdminRoute />}>
