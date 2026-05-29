@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   createDragonTigerRound,
   getActiveDragonTigerGame,
@@ -9,10 +9,10 @@ import {
   dealDragonTiger,
   DragonTigerGame,
   DTBet,
-} from '../firebase/games';
-import CardDisplay from '../components/games/CardDisplay';
-import GameTimer from '../components/games/GameTimer';
-import { formatCurrency, calculateUsableBalance } from '../utils/helpers';
+} from '../../firebase/games';
+import CardDisplay from '../../components/games/CardDisplay';
+import GameTimer from '../../components/games/GameTimer';
+import { formatCurrency, calculateUsableBalance } from '../../utils/helpers';
 import {
   Users, History, Loader2, AlertCircle,
   CheckCircle, Coins, Flame,
