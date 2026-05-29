@@ -6,10 +6,10 @@ import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute, AdminRoute, PublicRoute } from './components/ProtectedRoute';
 import { MainLayout } from './components/Layout/MainLayout';
 
-import { DragonTigerPage } from './pages/games/DragonTiger';
-import { AndarBaharPage } from './pages/games/AndarBahar';
-import { PokerGamePage } from './pages/games/PokerGame';
-import { PokerLobbyPage } from './pages/games/PokerLobby';
+import DragonTigerPage from './pages/games/DragonTiger';
+import AndarBaharPage from './pages/games/AndarBahar';
+import PokerGamePage from './pages/games/PokerGame';
+import PokerLobbyPage from './pages/games/PokerLobby';
 
 
 
