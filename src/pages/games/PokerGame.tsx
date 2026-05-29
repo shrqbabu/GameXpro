@@ -1,513 +1,593 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { deductFunds, addFunds } from '../../firebase/wallet';
-import toast from 'react-hot-toast';
+// src/pages/PokerGamePage.tsx
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import {
+  subscribePokerTable,
+  startPokerHand,
+  pokerAction,
+  leavePokerTable,
+  PokerTable,
+  PokerPlayer,
+} from '../firebase/games';
+import CardDisplay from '../components/games/CardDisplay';
+import { formatCurrency, calculateUsableBalance } from '../utils/helpers';
+import {
+  ArrowLeft, Users, Loader2, Play, LogOut,
+  ChevronDown, Zap, Trophy, AlertCircle,
+} from 'lucide-react';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-type Suit = '♠' | '♥' | '♦' | '♣';
-type Phase = 'LOBBY' | 'PRE_FLOP' | 'FLOP' | 'TURN' | 'RIVER' | 'SHOWDOWN';
-type PlayerAction = 'FOLD' | 'CHECK' | 'CALL' | 'RAISE' | null;
+// ─── Player Seat Positions (CSS) ─────────────────────
+const SEAT_POSITIONS = [
+  'bottom-4 left-1/2 -translate-x-1/2',           // Seat 0 — Bottom center (You)
+  'top-4 right-12',                                 // Seat 1 — Top right
+  'top-4 left-1/2 -translate-x-1/2',               // Seat 2 — Top center
+  'top-4 left-12',                                  // Seat 3 — Top left
+];
 
-interface Card { value: string; suit: Suit; rank: number }
+// ─── Action Button Config ─────────────────────────────
+const ACTION_BUTTONS = [
+  { action: 'fold', label: 'Fold', color: 'from-red-700 to-red-900 border-red-600/40', textColor: 'text-white' },
+  { action: 'check', label: 'Check', color: 'from-blue-700 to-blue-900 border-blue-600/40', textColor: 'text-white' },
+  { action: 'call', label: 'Call', color: 'from-emerald-700 to-emerald-900 border-emerald-600/40', textColor: 'text-white' },
+  { action: 'raise', label: 'Raise', color: 'from-purple-700 to-purple-900 border-purple-600/40', textColor: 'text-white' },
+  { action: 'allin', label: 'All In!', color: 'from-yellow-600 to-yellow-800 border-yellow-500/40', textColor: 'text-gray-900' },
+] as const;
 
-const VALUES = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
-const SUITS: Suit[] = ['♠','♥','♦','♣'];
-const BET_AMOUNTS = [10, 25, 50, 100, 200];
+const PokerGamePage: React.FC = () => {
+  const { tableId } = useParams<{ tableId: string }>();
+  const { user } = useAuth();
+  const navigate = useNavigate();
 
-function buildDeck(): Card[] {
-  const deck: Card[] = [];
-  for (const s of SUITS) for (let i = 0; i < VALUES.length; i++) deck.push({ value: VALUES[i], suit: s, rank: i + 2 });
-  return deck.sort(() => Math.random() - 0.5);
-}
+  const [table, setTable] = useState<PokerTable | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [raiseAmount, setRaiseAmount] = useState(0);
+  const [error, setError] = useState('');
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
 
-function isRed(suit: Suit) { return suit === '♥' || suit === '♦'; }
+  useEffect(() => {
+    if (!tableId) return;
+    const unsub = subscribePokerTable(tableId, (data) => {
+      setTable(data);
+      setLoading(false);
+      if (data.currentBet) {
+        setRaiseAmount(data.currentBet * 2);
+      }
+    });
+    return unsub;
+  }, [tableId]);
 
-// ─── Simple hand evaluator ────────────────────────────────────────────────────
-function evaluateHand(cards: Card[]): { score: number; name: string } {
-  const best = getBestFiveFrom(cards);
-  return best;
-}
+  const myPlayer = table?.players.find((p) => p.uid === user?.uid);
+  const isMyTurn = table?.activePlayerUid === user?.uid;
+  const phase = table?.phase || 'waiting';
+  const communityCards = table?.communityCards || [];
+  const pot = table?.pot || 0;
+  const currentBet = table?.currentBet || 0;
+  const canStart = (table?.players.length || 0) >= 2 &&
+    table?.status === 'waiting' &&
+    table?.createdBy === user?.uid;
 
-function getBestFiveFrom(cards: Card[]): { score: number; name: string } {
-  // Return highest score among all C(7,5) combos
-  const combos = choose5(cards);
-  let best = { score: 0, name: 'High Card' };
-  for (const c of combos) {
-    const r = scoreFive(c);
-    if (r.score > best.score) best = r;
-  }
-  return best;
-}
+  const callAmount = Math.min(
+    currentBet - (myPlayer?.bet || 0),
+    myPlayer?.chips || 0
+  );
 
-function choose5(cards: Card[]): Card[][] {
-  const result: Card[][] = [];
-  for (let i = 0; i < cards.length; i++)
-    for (let j = i+1; j < cards.length; j++)
-      for (let k = j+1; k < cards.length; k++)
-        for (let l = k+1; l < cards.length; l++)
-          for (let m = l+1; m < cards.length; m++)
-            result.push([cards[i],cards[j],cards[k],cards[l],cards[m]]);
-  return result;
-}
+  const handleAction = async (
+    action: 'fold' | 'check' | 'call' | 'raise' | 'allin'
+  ) => {
+    if (!user || !tableId || actionLoading) return;
+    setActionLoading(true);
+    setError('');
+    try {
+      await pokerAction(
+        tableId,
+        user.uid,
+        action,
+        action === 'raise' ? raiseAmount : undefined
+      );
+    } catch (e: any) {
+      setError(e.message || 'Action failed');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
-function scoreFive(cards: Card[]): { score: number; name: string } {
-  const ranks = cards.map(c => c.rank).sort((a,b)=>b-a);
-  const suits = cards.map(c => c.suit);
-  const flush = suits.every(s => s === suits[0]);
-  const straight = ranks[0]-ranks[4]===4 && new Set(ranks).size===5;
-  const straightAceLow = JSON.stringify(ranks) === JSON.stringify([14,5,4,3,2]);
-  const groups = Object.values(ranks.reduce((a: Record<number,number>,r)=>{a[r]=(a[r]||0)+1;return a;},{})).sort((a,b)=>b-a);
-  const topRank = ranks[0];
+  const handleStart = async () => {
+    if (!tableId || starting) return;
+    setStarting(true);
+    setError('');
+    try {
+      await startPokerHand(tableId);
+    } catch (e: any) {
+      setError(e.message || 'Failed to start');
+    } finally {
+      setStarting(false);
+    }
+  };
 
-  if ((straight||straightAceLow) && flush) return { score: 800+topRank, name: straight && topRank===14 ? '🏆 Royal Flush' : '🎯 Straight Flush' };
-  if (groups[0]===4) return { score: 700+topRank, name: '4️⃣ Four of a Kind' };
-  if (groups[0]===3 && groups[1]===2) return { score: 600+topRank, name: '🏠 Full House' };
-  if (flush) return { score: 500+topRank, name: '♠ Flush' };
-  if (straight||straightAceLow) return { score: 400+topRank, name: '⬆️ Straight' };
-  if (groups[0]===3) return { score: 300+topRank, name: '3️⃣ Three of a Kind' };
-  if (groups[0]===2 && groups[1]===2) return { score: 200+topRank, name: '✌️ Two Pair' };
-  if (groups[0]===2) return { score: 100+topRank, name: '👥 One Pair' };
-  return { score: topRank, name: '🃏 High Card' };
-}
+  const handleLeave = async () => {
+    if (!user || !tableId || leaving) return;
+    setLeaving(true);
+    try {
+      await leavePokerTable(tableId, user.uid);
+      navigate('/poker');
+    } catch (e: any) {
+      setError(e.message || 'Failed to leave');
+      setLeaving(false);
+    }
+  };
 
-// ─── Card component ───────────────────────────────────────────────────────────
-function PokerCard({ card, faceDown, small }: { card?: Card; faceDown?: boolean; small?: boolean }) {
-  const sz = small ? { w: 40, h: 56, fs: 10, sf: 14 } : { w: 60, h: 84, fs: 13, sf: 22 };
-  if (faceDown || !card) {
+  const getPhaseLabel = () => {
+    const labels: Record<string, string> = {
+      waiting: '⏳ Waiting for players',
+      preflop: '🃏 Pre-Flop',
+      flop: '🃏 The Flop',
+      turn: '🃏 The Turn',
+      river: '🃏 The River',
+      showdown: '🏆 Showdown!',
+    };
+    return labels[phase] || phase;
+  };
+
+  const getPlayerSeatPosition = (player: PokerPlayer) => {
+    return SEAT_POSITIONS[player.seatIndex % SEAT_POSITIONS.length];
+  };
+
+  if (loading) {
     return (
-      <div style={{ width:sz.w, height:sz.h, background:'linear-gradient(135deg,#1a0a3e,#0d1b2a)', border:'2px solid rgba(212,175,55,0.5)', borderRadius:7, display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0 }}>
-        <div style={{ width:sz.w-14, height:sz.h-14, border:'1px solid rgba(212,175,55,0.2)', borderRadius:4, background:'repeating-linear-gradient(45deg,rgba(212,175,55,0.04) 0,rgba(212,175,55,0.04) 2px,transparent 2px,transparent 8px)' }} />
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent
+            rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-gray-400">Loading table...</p>
+        </div>
       </div>
     );
   }
-  const red = isRed(card.suit);
-  return (
-    <div style={{ width:sz.w, height:sz.h, background:'linear-gradient(135deg,#fffef5,#f8f4e8)', border:`2px solid ${red?'rgba(248,113,113,0.7)':'rgba(30,30,50,0.4)'}`, borderRadius:7, display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center', flexShrink:0, position:'relative', animation:'cardIn 0.35s ease-out' }}>
-      <span style={{ position:'absolute',top:3,left:5,fontFamily:"'Cinzel',serif",fontSize:sz.fs,fontWeight:800,color:red?'#dc2626':'#1a1a2e',lineHeight:1 }}>{card.value}</span>
-      <span style={{ fontSize:sz.sf, color:red?'#dc2626':'#1a1a2e' }}>{card.suit}</span>
-      <span style={{ position:'absolute',bottom:3,right:5,fontFamily:"'Cinzel',serif",fontSize:sz.fs,fontWeight:800,color:red?'#dc2626':'#1a1a2e',lineHeight:1,transform:'rotate(180deg)' }}>{card.value}</span>
-    </div>
-  );
-}
 
-// ─── Main component ───────────────────────────────────────────────────────────
-export function PokerGame() {
-  const navigate = useNavigate();
-  const { user, wallet } = useAuth();
-  const [phase, setPhase] = useState<Phase>('LOBBY');
-  const [buyIn, setBuyIn] = useState(100);
-  const [customBuyIn, setCustomBuyIn] = useState('');
-  const [deck, setDeck] = useState<Card[]>([]);
-  const [playerHand, setPlayerHand] = useState<Card[]>([]);
-  const [botHand, setBotHand] = useState<Card[]>([]);
-  const [community, setCommunity] = useState<Card[]>([]);
-  const [pot, setPot] = useState(0);
-  const [playerStack, setPlayerStack] = useState(0);
-  const [botStack, setBotStack] = useState(1000);
-  const [playerBet, setPlayerBet] = useState(0);
-  const [botBet, setBotBet] = useState(0);
-  const [raiseAmount, setRaiseAmount] = useState(50);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [winner, setWinner] = useState<'PLAYER' | 'BOT' | 'TIE' | null>(null);
-  const [showBotCards, setShowBotCards] = useState(false);
-  const [playerHandName, setPlayerHandName] = useState('');
-  const [botHandName, setBotHandName] = useState('');
-  const [history, setHistory] = useState<('WIN'|'LOSE'|'TIE')[]>([]);
-
-  const effectiveBuyIn = customBuyIn ? parseInt(customBuyIn) || 0 : buyIn;
-  const balance = wallet?.totalBalance ?? 0;
-  const SMALL_BLIND = Math.max(5, Math.floor(effectiveBuyIn * 0.05));
-  const BIG_BLIND = SMALL_BLIND * 2;
-
-  const startGame = async () => {
-    if (effectiveBuyIn < 20) return toast.error('Minimum buy-in ₹20 hai');
-    if (!wallet || balance < effectiveBuyIn) return toast.error('Insufficient balance');
-    if (!user) return;
-    setLoading(true);
-    try {
-      await deductFunds(user.uid, effectiveBuyIn, 'GAME_LOSS', 'Poker buy-in');
-      const d = buildDeck();
-      const ph = [d[0], d[2]];
-      const bh = [d[1], d[3]];
-      const remaining = d.slice(4);
-      setDeck(remaining);
-      setPlayerHand(ph);
-      setBotHand(bh);
-      setCommunity([]);
-      setPlayerStack(effectiveBuyIn - BIG_BLIND);
-      setBotStack(1000 - SMALL_BLIND);
-      setPlayerBet(BIG_BLIND);
-      setBotBet(SMALL_BLIND);
-      setPot(BIG_BLIND + SMALL_BLIND);
-      setWinner(null);
-      setShowBotCards(false);
-      setMessage(`You: Big Blind ₹${BIG_BLIND} | Bot: Small Blind ₹${SMALL_BLIND}`);
-      setPhase('PRE_FLOP');
-    } catch (e: any) {
-      toast.error(e.message || 'Error');
-    }
-    setLoading(false);
-  };
-
-  const botAction = (currentPot: number, currentComm: Card[], nextPhase: Phase, currentDeck: Card[]) => {
-    const botHandEval = evaluateHand([...botHand, ...currentComm]);
-    const shouldBluff = Math.random() < 0.25;
-    if (botHandEval.score > 300 || shouldBluff) {
-      const raisePct = Math.floor(currentPot * (0.3 + Math.random() * 0.4));
-      setBotBet(b => b + raisePct);
-      setBotStack(s => s - raisePct);
-      setPot(p => p + raisePct);
-      setMessage(`Bot raises ₹${raisePct}! Call, Raise, or Fold?`);
-    } else {
-      setMessage('Bot checks. Your turn!');
-    }
-    setPhase(nextPhase);
-  };
-
-  const dealFlop = () => {
-    const flop = [deck[0], deck[1], deck[2]];
-    const rest = deck.slice(3);
-    setDeck(rest);
-    setCommunity(flop);
-    botAction(pot, flop, 'FLOP', rest);
-  };
-
-  const dealTurn = () => {
-    const card = deck[0];
-    const rest = deck.slice(1);
-    setDeck(rest);
-    const newComm = [...community, card];
-    setCommunity(newComm);
-    botAction(pot, newComm, 'TURN', rest);
-  };
-
-  const dealRiver = () => {
-    const card = deck[0];
-    setDeck(deck.slice(1));
-    const newComm = [...community, card];
-    setCommunity(newComm);
-    botAction(pot, newComm, 'RIVER', deck.slice(1));
-  };
-
-  const showdown = async () => {
-    setShowBotCards(true);
-    const allComm = community;
-    const pH = evaluateHand([...playerHand, ...allComm]);
-    const bH = evaluateHand([...botHand, ...allComm]);
-    setPlayerHandName(pH.name);
-    setBotHandName(bH.name);
-
-    let w: 'PLAYER' | 'BOT' | 'TIE';
-    if (pH.score > bH.score) w = 'PLAYER';
-    else if (bH.score > pH.score) w = 'BOT';
-    else w = 'TIE';
-    setWinner(w);
-    setHistory(h => [w === 'PLAYER' ? 'WIN' : w === 'BOT' ? 'LOSE' : 'TIE', ...h.slice(0,19)]);
-
-    if (w === 'PLAYER' && user) {
-      await addFunds(user.uid, pot, 'winningBalance', 'Poker win');
-      setMessage(`🎉 Aap jeete! ₹${pot} pot mila | ${pH.name}`);
-      toast.success(`Poker mein jeete! ₹${pot}`);
-    } else if (w === 'BOT') {
-      setMessage(`💔 Bot jeeta (${bH.name} vs ${pH.name})`);
-      toast.error('Bot jeeta');
-    } else {
-      const split = Math.floor(pot / 2);
-      if (user) await addFunds(user.uid, split, 'winningBalance', 'Poker tie split');
-      setMessage(`🤝 Tie! ₹${split} wapas mila | ${pH.name}`);
-      toast('Tie! Pot split hua');
-    }
-    setPhase('SHOWDOWN');
-  };
-
-  const playerFold = async () => {
-    setWinner('BOT');
-    setShowBotCards(true);
-    setHistory(h => ['LOSE', ...h.slice(0,19)]);
-    setMessage('Aapne fold kiya. Bot jeeta!');
-    setPhase('SHOWDOWN');
-    toast.error('Fold kar diya');
-  };
-
-  const playerCall = () => {
-    const diff = botBet - playerBet;
-    const actualCall = Math.min(diff, playerStack);
-    setPlayerStack(s => s - actualCall);
-    setPlayerBet(b => b + actualCall);
-    setPot(p => p + actualCall);
-    if (phase === 'PRE_FLOP') dealFlop();
-    else if (phase === 'FLOP') dealTurn();
-    else if (phase === 'TURN') dealRiver();
-    else if (phase === 'RIVER') showdown();
-  };
-
-  const playerCheck = () => {
-    if (phase === 'PRE_FLOP') dealFlop();
-    else if (phase === 'FLOP') dealTurn();
-    else if (phase === 'TURN') dealRiver();
-    else if (phase === 'RIVER') showdown();
-  };
-
-  const playerRaise = () => {
-    if (raiseAmount <= 0 || raiseAmount > playerStack) return toast.error('Invalid raise amount');
-    setPlayerStack(s => s - raiseAmount);
-    setPlayerBet(b => b + raiseAmount);
-    setPot(p => p + raiseAmount);
-    // Bot responds
-    const botFolds = Math.random() < 0.3;
-    if (botFolds) {
-      setWinner('PLAYER');
-      setMessage(`🎉 Bot ne fold kiya! Pot ₹${pot + raiseAmount} aapka`);
-      setHistory(h => ['WIN', ...h.slice(0,19)]);
-      if (user) addFunds(user.uid, pot + raiseAmount, 'winningBalance', 'Poker win - bot folded');
-      setPhase('SHOWDOWN');
-    } else {
-      setBotBet(b => b + Math.floor(raiseAmount * 0.8));
-      setBotStack(s => s - Math.floor(raiseAmount * 0.8));
-      setPot(p => p + Math.floor(raiseAmount * 0.8));
-      if (phase === 'PRE_FLOP') dealFlop();
-      else if (phase === 'FLOP') dealTurn();
-      else if (phase === 'TURN') dealRiver();
-      else if (phase === 'RIVER') showdown();
-    }
-  };
-
-  const resetGame = () => {
-    setPhase('LOBBY');
-    setWinner(null);
-    setShowBotCards(false);
-    setPlayerHand([]);
-    setBotHand([]);
-    setCommunity([]);
-    setMessage('');
-    setPlayerHandName('');
-    setBotHandName('');
-    setPot(0);
-  };
+  if (!table) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-white text-xl mb-4">Table not found</p>
+          <button onClick={() => navigate('/poker')}
+            className="text-purple-400 hover:text-purple-300 flex items-center gap-2 mx-auto">
+            <ArrowLeft className="w-4 h-4" /> Back to Lobby
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="poker-root">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Raleway:wght@300;400;500&display=swap');
-        @keyframes cardIn{from{opacity:0;transform:translateY(-16px) scale(0.85)}to{opacity:1;transform:translateY(0) scale(1)}}
-        .poker-root{min-height:100vh;background:radial-gradient(ellipse at top,#0f1f0a 0%,#071305 60%,#000 100%);font-family:'Raleway',sans-serif;color:#e2e8f0;padding-bottom:40px;}
-        .pk-header{display:flex;align-items:center;gap:12px;padding:20px 24px;border-bottom:1px solid rgba(34,197,94,0.2);background:rgba(0,0,0,0.5);backdrop-filter:blur(10px);position:sticky;top:0;z-index:10;}
-        .pk-back{background:none;border:1px solid rgba(34,197,94,0.3);color:#22c55e;padding:8px 16px;border-radius:8px;cursor:pointer;font-family:'Raleway',sans-serif;font-size:13px;transition:all 0.2s;}
-        .pk-back:hover{background:rgba(34,197,94,0.1);}
-        .pk-title{font-family:'Cinzel',serif;font-size:20px;font-weight:800;background:linear-gradient(135deg,#22c55e,#86efac,#22c55e);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:2px;}
-        .pk-balance{margin-left:auto;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);padding:6px 14px;border-radius:20px;font-size:13px;color:#22c55e;font-weight:500;}
-        .pk-table{max-width:720px;margin:24px auto 0;padding:0 16px;}
-        .felt{background:radial-gradient(ellipse,#0d2b0d 0%,#061806 70%,#020b02 100%);border:3px solid rgba(34,197,94,0.5);border-radius:24px;padding:28px 20px;position:relative;box-shadow:0 0 60px rgba(34,197,94,0.1),inset 0 0 40px rgba(0,0,0,0.6);}
-        .felt::before{content:'';position:absolute;inset:6px;border:1px solid rgba(34,197,94,0.12);border-radius:18px;pointer-events:none;}
+    <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+      {/* Top Bar */}
+      <div className="bg-gray-900/95 backdrop-blur-md border-b border-gray-700/50
+        px-4 py-3 flex items-center justify-between z-30">
+        <button
+          onClick={() => setShowLeaveConfirm(true)}
+          className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors">
+          <ArrowLeft className="w-4 h-4" />
+          <span className="text-sm hidden sm:block">Lobby</span>
+        </button>
 
-        /* Table sections */
-        .bot-area,.player-area{padding:12px;border-radius:12px;margin-bottom:12px;}
-        .bot-area{background:rgba(239,68,68,0.04);border:1px solid rgba(239,68,68,0.15);}
-        .player-area{background:rgba(34,197,94,0.04);border:1px solid rgba(34,197,94,0.15);}
-        .area-label{font-family:'Cinzel',serif;font-size:10px;letter-spacing:3px;text-transform:uppercase;margin-bottom:8px;}
-        .bot-label{color:rgba(239,68,68,0.7);}
-        .player-label{color:rgba(34,197,94,0.7);}
-        .hand-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
-        .hand-name{font-family:'Cinzel',serif;font-size:11px;color:#d4af37;margin-left:8px;background:rgba(212,175,55,0.1);border:1px solid rgba(212,175,55,0.3);padding:2px 8px;border-radius:10px;}
+        <div className="flex items-center gap-3">
+          <div className="text-center">
+            <p className="text-white font-bold text-sm">{table.name}</p>
+            <p className="text-gray-500 text-xs">
+              Blinds: {formatCurrency(table.smallBlind)}/{formatCurrency(table.bigBlind)}
+            </p>
+          </div>
+          <span className={`text-xs px-2 py-0.5 rounded-full border
+            ${phase === 'waiting'
+              ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+              : phase === 'showdown'
+              ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+              : 'bg-purple-500/20 text-purple-400 border-purple-500/30'}`}>
+            {getPhaseLabel()}
+          </span>
+        </div>
 
-        /* Community cards */
-        .community-area{background:rgba(212,175,55,0.03);border:1px solid rgba(212,175,55,0.15);border-radius:12px;padding:14px 12px;margin-bottom:14px;text-align:center;}
-        .community-label{font-family:'Cinzel',serif;font-size:10px;letter-spacing:3px;color:rgba(212,175,55,0.6);text-transform:uppercase;margin-bottom:10px;}
-        .community-cards{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
-        .empty-slot{width:60px;height:84px;border:2px dashed rgba(212,175,55,0.15);border-radius:7px;}
-
-        /* Pot */
-        .pot-display{text-align:center;margin-bottom:16px;}
-        .pot-label{font-size:11px;color:rgba(212,175,55,0.5);letter-spacing:2px;text-transform:uppercase;}
-        .pot-amount{font-family:'Cinzel',serif;font-size:28px;font-weight:800;color:#d4af37;}
-
-        /* Message */
-        .game-message{text-align:center;padding:10px 16px;background:rgba(0,0,0,0.3);border-radius:8px;font-size:13px;color:rgba(226,232,240,0.8);margin-bottom:16px;min-height:36px;border:1px solid rgba(255,255,255,0.05);}
-
-        /* Actions */
-        .action-bar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:16px;}
-        .act-btn{padding:12px 20px;border-radius:10px;border:2px solid transparent;cursor:pointer;font-family:'Cinzel',serif;font-size:13px;font-weight:700;letter-spacing:1px;transition:all 0.2s;min-width:80px;}
-        .fold-btn{background:rgba(239,68,68,0.12);border-color:rgba(239,68,68,0.4);color:#ef4444;}
-        .fold-btn:hover{background:rgba(239,68,68,0.22);border-color:#ef4444;}
-        .check-btn{background:rgba(226,232,240,0.08);border-color:rgba(226,232,240,0.25);color:#e2e8f0;}
-        .check-btn:hover{background:rgba(226,232,240,0.15);border-color:#e2e8f0;}
-        .call-btn{background:rgba(34,197,94,0.12);border-color:rgba(34,197,94,0.4);color:#22c55e;}
-        .call-btn:hover{background:rgba(34,197,94,0.22);border-color:#22c55e;}
-        .raise-btn{background:rgba(212,175,55,0.12);border-color:rgba(212,175,55,0.4);color:#d4af37;}
-        .raise-btn:hover{background:rgba(212,175,55,0.22);border-color:#d4af37;}
-        .act-btn:disabled{opacity:0.35;cursor:not-allowed;}
-        .raise-input-row{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:12px;}
-        .raise-input-row input{background:rgba(255,255,255,0.05);border:1px solid rgba(212,175,55,0.3);color:#e2e8f0;padding:7px 12px;border-radius:8px;font-family:'Raleway',sans-serif;font-size:14px;width:90px;text-align:center;outline:none;}
-        .raise-input-row input:focus{border-color:#d4af37;}
-        .raise-label{font-size:12px;color:rgba(212,175,55,0.6);}
-
-        /* Lobby */
-        .lobby{text-align:center;padding:20px 0;}
-        .lobby-title{font-family:'Cinzel',serif;font-size:24px;font-weight:800;color:#22c55e;margin-bottom:8px;letter-spacing:2px;}
-        .lobby-sub{color:rgba(226,232,240,0.5);font-size:14px;margin-bottom:24px;}
-        .buyin-chips{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:14px;}
-        .buyin-chip{padding:8px 16px;border-radius:20px;border:2px solid rgba(34,197,94,0.3);background:rgba(34,197,94,0.05);color:#22c55e;cursor:pointer;font-family:'Cinzel',serif;font-size:13px;font-weight:700;transition:all 0.2s;}
-        .buyin-chip:hover,.buyin-chip.active{background:rgba(34,197,94,0.2);border-color:#22c55e;transform:scale(1.05);}
-        .custom-buyin{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:20px;}
-        .custom-buyin input{background:rgba(255,255,255,0.05);border:1px solid rgba(34,197,94,0.3);color:#e2e8f0;padding:8px 12px;border-radius:8px;font-family:'Raleway',sans-serif;font-size:14px;width:110px;text-align:center;outline:none;}
-        .custom-buyin input:focus{border-color:#22c55e;}
-        .custom-buyin-label{font-size:12px;color:rgba(34,197,94,0.6);}
-        .start-btn{padding:16px 48px;border-radius:12px;border:none;background:linear-gradient(135deg,#16a34a,#22c55e,#16a34a);color:#fff;font-family:'Cinzel',serif;font-size:16px;font-weight:800;letter-spacing:2px;cursor:pointer;transition:all 0.2s;box-shadow:0 4px 20px rgba(34,197,94,0.3);}
-        .start-btn:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(34,197,94,0.5);}
-        .start-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none;}
-        .blinds-info{color:rgba(212,175,55,0.6);font-size:12px;margin-bottom:16px;}
-
-        /* Showdown */
-        .showdown-result{text-align:center;padding:12px 0 18px;}
-        .sd-win{font-family:'Cinzel',serif;font-size:22px;font-weight:800;color:#22c55e;}
-        .sd-lose{font-family:'Cinzel',serif;font-size:22px;font-weight:800;color:#ef4444;}
-        .sd-tie{font-family:'Cinzel',serif;font-size:22px;font-weight:800;color:#d4af37;}
-        .sd-sub{font-size:13px;color:rgba(226,232,240,0.6);margin-top:4px;margin-bottom:18px;}
-        .new-game-btn{background:rgba(34,197,94,0.1);border:2px solid #22c55e;color:#22c55e;padding:12px 32px;border-radius:10px;cursor:pointer;font-family:'Cinzel',serif;font-size:14px;transition:all 0.2s;}
-        .new-game-btn:hover{background:rgba(34,197,94,0.2);}
-
-        .stacks-row{display:flex;justify-content:space-between;margin-bottom:10px;font-size:12px;color:rgba(226,232,240,0.5);}
-        .stack-info span{color:#22c55e;font-weight:600;}
-
-        .history-strip{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:16px;padding-top:14px;border-top:1px solid rgba(34,197,94,0.1);}
-        .history-label{width:100%;text-align:center;font-size:10px;color:rgba(34,197,94,0.4);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;}
-        .hist-dot{width:26px;height:26px;border-radius:50%;font-size:9px;font-family:'Cinzel',serif;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid;}
-        .hist-w{background:rgba(34,197,94,0.15);border-color:rgba(34,197,94,0.5);color:#22c55e;}
-        .hist-l{background:rgba(239,68,68,0.15);border-color:rgba(239,68,68,0.5);color:#ef4444;}
-        .hist-t{background:rgba(212,175,55,0.15);border-color:rgba(212,175,55,0.5);color:#d4af37;}
-      `}</style>
-
-      <div className="pk-header">
-        <button className="pk-back" onClick={() => navigate('/dashboard')}>← Back</button>
-        <span className="pk-title">♠ Poker</span>
-        <span className="pk-balance">₹{balance.toLocaleString('en-IN')}</span>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <p className="text-gray-500 text-xs">Chips</p>
+            <p className="text-yellow-400 font-bold text-sm">
+              {formatCurrency(myPlayer?.chips || 0)}
+            </p>
+          </div>
+          <div className="flex items-center gap-1 text-gray-400 text-sm">
+            <Users className="w-4 h-4" />
+            {table.players.length}/4
+          </div>
+        </div>
       </div>
 
-      <div className="pk-table">
-        <div className="felt">
+      {/* ── MAIN TABLE AREA ──────────────────────────── */}
+      <div className="flex-1 relative overflow-hidden flex items-center justify-center
+        min-h-[400px] md:min-h-[500px] p-4">
 
-          {/* LOBBY */}
-          {phase === 'LOBBY' && (
-            <div className="lobby">
-              <div className="lobby-title">Texas Hold'em Poker</div>
-              <div className="lobby-sub">Bot ke against 1v1 khelo</div>
-              <div className="buyin-chips">
-                {[50,100,200,500,1000].map(a => (
-                  <button key={a} className={`buyin-chip ${!customBuyIn && buyIn === a ? 'active' : ''}`}
-                    onClick={() => { setBuyIn(a); setCustomBuyIn(''); }}>
-                    ₹{a}
-                  </button>
-                ))}
+        {/* TABLE FELT */}
+        <div className="relative w-full max-w-2xl" style={{ aspectRatio: '2/1.2' }}>
+          {/* Outer rim */}
+          <div className="absolute inset-0 rounded-[45%] bg-gradient-to-br
+            from-yellow-800 via-amber-900 to-yellow-800 shadow-2xl" />
+
+          {/* Felt surface */}
+          <div className="absolute inset-2 rounded-[45%] bg-gradient-to-br
+            from-green-800 via-green-700 to-emerald-800 shadow-inner">
+
+            {/* Inner border */}
+            <div className="absolute inset-3 rounded-[45%] border border-yellow-600/20" />
+
+            {/* ── CENTER CONTENT ── */}
+            <div className="absolute inset-0 flex flex-col items-center
+              justify-center gap-3">
+
+              {/* Pot Display */}
+              {pot > 0 && (
+                <div className="bg-gray-900/70 backdrop-blur-sm rounded-xl
+                  px-4 py-1.5 border border-yellow-500/20">
+                  <p className="text-yellow-400 font-black text-sm">
+                    POT: {formatCurrency(pot)}
+                  </p>
+                </div>
+              )}
+
+              {/* Community Cards */}
+              {phase !== 'waiting' && phase !== 'preflop' && (
+                <div className="flex gap-1.5 justify-center">
+                  {[...Array(5)].map((_, i) => (
+                    <CardDisplay
+                      key={i}
+                      card={communityCards[i] || undefined}
+                      faceDown={!communityCards[i]}
+                      size="sm"
+                      animate={!!communityCards[i]}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Phase Label */}
+              {phase === 'preflop' && (
+                <p className="text-white/40 text-xs font-medium uppercase tracking-widest">
+                  Pre-Flop Betting
+                </p>
+              )}
+
+              {phase === 'waiting' && (
+                <div className="text-center">
+                  {table.players.length < 2 ? (
+                    <p className="text-white/40 text-xs">
+                      Waiting for players...
+                      <br />
+                      ({table.players.length}/2 minimum)
+                    </p>
+                  ) : canStart ? (
+                    <p className="text-emerald-400/70 text-xs animate-pulse">
+                      Ready! Start the game
+                    </p>
+                  ) : (
+                    <p className="text-white/40 text-xs">
+                      Waiting for host to start...
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Current Bet Indicator */}
+              {currentBet > 0 && phase !== 'waiting' && (
+                <div className="bg-white/10 backdrop-blur-sm rounded-lg px-3 py-1">
+                  <p className="text-white/70 text-xs">
+                    Current bet: <span className="font-bold text-white">
+                      {formatCurrency(currentBet)}
+                    </span>
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── PLAYER SEATS ── */}
+          {table.players.map((player) => {
+            const posClass = getPlayerSeatPosition(player);
+            const isMe = player.uid === user?.uid;
+            const isActive = table.activePlayerUid === player.uid;
+
+            return (
+              <div
+                key={player.uid}
+                className={`absolute ${posClass} z-10`}
+              >
+                <div className={`
+                  bg-gray-900/95 backdrop-blur-sm border-2 rounded-2xl p-2.5
+                  transition-all duration-300 min-w-[130px]
+                  ${isActive && phase !== 'waiting' && phase !== 'showdown'
+                    ? 'border-yellow-400 shadow-lg shadow-yellow-400/30 scale-105'
+                    : isMe
+                    ? 'border-purple-500/50'
+                    : 'border-gray-700/70'}
+                  ${player.status === 'folded' ? 'opacity-40' : ''}
+                `}>
+                  {/* Turn indicator */}
+                  {isActive && phase !== 'waiting' && (
+                    <div className="absolute -top-1.5 left-1/2 -translate-x-1/2
+                      w-3 h-3 bg-yellow-400 rounded-full animate-ping" />
+                  )}
+
+                  {/* Player info */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center
+                      text-xs font-black shrink-0
+                      ${isMe
+                        ? 'bg-gradient-to-br from-purple-500 to-blue-600 text-white'
+                        : 'bg-gradient-to-br from-gray-600 to-gray-700 text-white'}`}>
+                      {player.name.charAt(0).toUpperCase()}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1">
+                        <p className="text-white text-xs font-bold truncate">
+                          {isMe ? 'You' : player.name}
+                        </p>
+                        {player.isDealer && (
+                          <span className="w-4 h-4 bg-white text-gray-900 rounded-full
+                            text-xs font-black flex items-center justify-center shrink-0">
+                            D
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-yellow-400 text-xs font-bold">
+                        {formatCurrency(player.chips)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Hole Cards */}
+                  <div className="flex gap-1 justify-center mb-1.5">
+                    {player.holeCards.length > 0 ? (
+                      isMe ? (
+                        player.holeCards.map((card, i) => (
+                          <CardDisplay key={i} card={card} size="xs" />
+                        ))
+                      ) : (
+                        player.holeCards.map((_, i) => (
+                          <CardDisplay key={i} faceDown size="xs" />
+                        ))
+                      )
+                    ) : (
+                      <div className="text-gray-700 text-xs">No cards</div>
+                    )}
+                  </div>
+
+                  {/* Bet / Status */}
+                  <div className="text-center">
+                    {player.bet > 0 && (
+                      <p className="text-gray-400 text-xs">
+                        Bet: {formatCurrency(player.bet)}
+                      </p>
+                    )}
+                    {player.status === 'folded' && (
+                      <p className="text-red-500 text-xs font-medium">Folded</p>
+                    )}
+                    {player.status === 'allin' && (
+                      <p className="text-yellow-400 text-xs font-black">ALL IN</p>
+                    )}
+                    {player.isSmallBlind && phase === 'preflop' && (
+                      <p className="text-blue-400 text-xs">SB</p>
+                    )}
+                    {player.isBigBlind && phase === 'preflop' && (
+                      <p className="text-purple-400 text-xs">BB</p>
+                    )}
+                    {/* Show hand rank at showdown */}
+                    {phase === 'showdown' && player.handRank && (
+                      <p className="text-yellow-400 text-xs font-bold">{player.handRank}</p>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="custom-buyin">
-                <span className="custom-buyin-label">Custom:</span>
-                <input type="number" placeholder="Buy-in" value={customBuyIn}
-                  onChange={e => setCustomBuyIn(e.target.value)} min={20} />
-              </div>
-              <div className="blinds-info">
-                Blinds: Small ₹{Math.max(5, Math.floor(effectiveBuyIn * 0.05))} / Big ₹{Math.max(10, Math.floor(effectiveBuyIn * 0.1))}
-              </div>
-              <button className="start-btn" onClick={startGame} disabled={loading}>
-                {loading ? 'Starting...' : `Game Shuru Karo — ₹${effectiveBuyIn}`}
-              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── BOTTOM ACTION PANEL ──────────────────────── */}
+      <div className="bg-gray-900/95 backdrop-blur-md border-t border-gray-700/50
+        px-4 py-4 z-30">
+        <div className="max-w-2xl mx-auto">
+
+          {/* Error */}
+          {error && (
+            <div className="flex items-center gap-2 text-red-400 text-sm mb-3
+              bg-red-500/10 border border-red-500/30 rounded-xl px-3 py-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {error}
             </div>
           )}
 
-          {/* GAME IN PROGRESS */}
-          {phase !== 'LOBBY' && (
-            <>
-              <div className="stacks-row">
-                <div className="stack-info">Bot Stack: <span>₹{botStack}</span></div>
-                <div className="stack-info">Aapka Stack: <span>₹{playerStack}</span></div>
-              </div>
-
-              {/* Bot hand */}
-              <div className="bot-area">
-                <div className="area-label bot-label">Bot ki Hand</div>
-                <div className="hand-row">
-                  {botHand.map((c, i) => <PokerCard key={i} card={c} faceDown={!showBotCards} />)}
-                  {showBotCards && botHandName && <span className="hand-name">{botHandName}</span>}
+          {/* ── WAITING PHASE ── */}
+          {phase === 'waiting' && (
+            <div className="text-center">
+              {canStart ? (
+                <button
+                  onClick={handleStart}
+                  disabled={starting}
+                  className="bg-gradient-to-r from-emerald-600 to-green-600
+                    text-white font-black px-8 py-3 rounded-xl hover:from-emerald-500
+                    hover:to-green-500 transition-all disabled:opacity-50
+                    flex items-center gap-2 mx-auto shadow-lg shadow-emerald-500/20">
+                  {starting ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Play className="w-5 h-5" />
+                  )}
+                  Start Game ({table.players.length} players)
+                </button>
+              ) : table.players.length < 2 ? (
+                <div className="text-gray-500">
+                  <p className="text-sm">Share this table link to invite players</p>
+                  <p className="text-yellow-400 text-xs mt-1">
+                    Need {2 - table.players.length} more player(s) to start
+                  </p>
                 </div>
-              </div>
-
-              {/* Community */}
-              <div className="community-area">
-                <div className="community-label">Community Cards</div>
-                <div className="community-cards">
-                  {[0,1,2,3,4].map(i => community[i]
-                    ? <PokerCard key={i} card={community[i]} />
-                    : <div key={i} className="empty-slot" />)}
-                </div>
-              </div>
-
-              {/* Pot */}
-              <div className="pot-display">
-                <div className="pot-label">Pot</div>
-                <div className="pot-amount">₹{pot.toLocaleString('en-IN')}</div>
-              </div>
-
-              {/* Player hand */}
-              <div className="player-area">
-                <div className="area-label player-label">Aapki Hand</div>
-                <div className="hand-row">
-                  {playerHand.map((c, i) => <PokerCard key={i} card={c} />)}
-                  {playerHandName && <span className="hand-name">{playerHandName}</span>}
-                </div>
-              </div>
-
-              {/* Message */}
-              <div className="game-message">{message}</div>
-
-              {/* SHOWDOWN result */}
-              {phase === 'SHOWDOWN' && (
-                <div className="showdown-result">
-                  <div className={winner === 'PLAYER' ? 'sd-win' : winner === 'BOT' ? 'sd-lose' : 'sd-tie'}>
-                    {winner === 'PLAYER' ? '🎉 Aap Jeete!' : winner === 'BOT' ? '💔 Bot Jeeta' : '🤝 Tie!'}
-                  </div>
-                  <div className="sd-sub">{message}</div>
-                  <button className="new-game-btn" onClick={resetGame}>Naya Game</button>
+              ) : (
+                <div className="text-gray-400 text-sm">
+                  Waiting for the host ({table.players.find(p => p.uid === table.createdBy)?.name}) to start...
                 </div>
               )}
-
-              {/* Actions */}
-              {phase !== 'SHOWDOWN' && (
-                <>
-                  <div className="raise-input-row">
-                    <span className="raise-label">Raise:</span>
-                    <input type="number" value={raiseAmount} min={BIG_BLIND}
-                      onChange={e => setRaiseAmount(parseInt(e.target.value)||BIG_BLIND)} />
-                  </div>
-                  <div className="action-bar">
-                    <button className="act-btn fold-btn" onClick={playerFold}>Fold</button>
-                    <button className="act-btn check-btn" onClick={playerCheck}
-                      disabled={botBet > playerBet}>Check</button>
-                    <button className="act-btn call-btn" onClick={playerCall}
-                      disabled={botBet <= playerBet}>
-                      Call {botBet > playerBet ? `₹${Math.min(botBet-playerBet, playerStack)}` : ''}
-                    </button>
-                    <button className="act-btn raise-btn" onClick={playerRaise}
-                      disabled={raiseAmount > playerStack}>Raise</button>
-                  </div>
-                </>
-              )}
-            </>
+            </div>
           )}
 
-          {/* History */}
-          {history.length > 0 && (
-            <div className="history-strip">
-              <div className="history-label">Last Games</div>
-              {history.map((h, i) => (
-                <div key={i} className={`hist-dot ${h==='WIN'?'hist-w':h==='LOSE'?'hist-l':'hist-t'}`}>
-                  {h==='WIN'?'W':h==='LOSE'?'L':'T'}
+          {/* ── MY TURN ACTIONS ── */}
+          {isMyTurn && phase !== 'waiting' && phase !== 'showdown' && myPlayer?.status === 'active' && (
+            <div className="space-y-3">
+              {/* Raise Slider */}
+              {myPlayer.chips > 0 && (
+                <div className="flex items-center gap-3">
+                  <span className="text-gray-500 text-xs w-12 shrink-0">Raise</span>
+                  <input
+                    type="range"
+                    min={currentBet * 2 || table.bigBlind * 2}
+                    max={(myPlayer.chips || 0) + (myPlayer.bet || 0)}
+                    value={raiseAmount}
+                    onChange={(e) => setRaiseAmount(Number(e.target.value))}
+                    className="flex-1 accent-purple-500 h-1"
+                  />
+                  <span className="text-yellow-400 text-sm font-bold w-20 text-right shrink-0">
+                    {formatCurrency(raiseAmount)}
+                  </span>
                 </div>
-              ))}
+              )}
+
+              {/* Action Buttons */}
+              <div className="grid grid-cols-5 gap-1.5">
+                {ACTION_BUTTONS.map(({ action, label, color, textColor }) => {
+                  // Hide check if there's a bet to call
+                  if (action === 'check' && myPlayer.bet < currentBet) return null;
+                  // Hide call if we're already at current bet
+                  if (action === 'call' && myPlayer.bet >= currentBet) return null;
+
+                  return (
+                    <button
+                      key={action}
+                      onClick={() => handleAction(action)}
+                      disabled={actionLoading}
+                      className={`bg-gradient-to-b ${color} border ${textColor}
+                        font-bold py-3 rounded-xl text-xs transition-all
+                        disabled:opacity-40 active:scale-95
+                        hover:brightness-110 flex flex-col items-center gap-0.5`}>
+                      <span>{label}</span>
+                      {action === 'call' && callAmount > 0 && (
+                        <span className="text-xs opacity-70 font-normal">
+                          {formatCurrency(callAmount)}
+                        </span>
+                      )}
+                      {action === 'raise' && (
+                        <span className="text-xs opacity-70 font-normal">
+                          {formatCurrency(raiseAmount)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── NOT MY TURN ── */}
+          {!isMyTurn && phase !== 'waiting' && phase !== 'showdown' &&
+            myPlayer?.status === 'active' && (
+            <div className="text-center text-gray-500 text-sm py-2">
+              <div className="flex items-center justify-center gap-2">
+                <div className="w-2 h-2 bg-yellow-500 rounded-full animate-ping" />
+                Waiting for{' '}
+                {table.players.find(p => p.uid === table.activePlayerUid)?.name || 'player'}...
+              </div>
+            </div>
+          )}
+
+          {/* ── FOLDED ── */}
+          {myPlayer?.status === 'folded' && phase !== 'showdown' && (
+            <div className="text-center text-red-400 text-sm py-2">
+              You folded. Waiting for the hand to finish...
+            </div>
+          )}
+
+          {/* ── SHOWDOWN ── */}
+          {phase === 'showdown' && (
+            <div className="text-center py-2">
+              <p className="text-yellow-400 font-black text-lg mb-3">🏆 Showdown!</p>
+              <div className="flex gap-3 justify-center flex-wrap">
+                {table.players
+                  .filter(p => p.status !== 'folded' && p.handRank)
+                  .map(p => (
+                    <div key={p.uid} className="bg-gray-800 rounded-xl px-4 py-2 text-sm">
+                      <p className="text-white font-bold">{p.uid === user?.uid ? 'You' : p.name}</p>
+                      <p className="text-yellow-400 text-xs">{p.handRank}</p>
+                    </div>
+                  ))}
+              </div>
+              {table.status === 'waiting' && canStart && (
+                <button
+                  onClick={handleStart}
+                  className="mt-3 bg-purple-600 hover:bg-purple-500 text-white
+                    font-bold px-6 py-2 rounded-xl transition-colors text-sm">
+                  Deal Next Hand
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* All-in waiting */}
+          {myPlayer?.status === 'allin' && phase !== 'showdown' && (
+            <div className="text-center text-yellow-400 text-sm py-2 font-bold">
+              You're ALL IN! Waiting for showdown...
             </div>
           )}
         </div>
       </div>
+
+      {/* ── LEAVE CONFIRM MODAL ── */}
+      {showLeaveConfirm && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex
+          items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6
+            w-full max-w-sm text-center">
+            <LogOut className="w-12 h-12 text-red-400 mx-auto mb-4" />
+            <h3 className="text-white font-bold text-lg mb-2">Leave Table?</h3>
+            <p className="text-gray-400 text-sm mb-2">
+              Your remaining chips will be credited to your winning balance.
+            </p>
+            {myPlayer && myPlayer.chips > 0 && (
+              <p className="text-emerald-400 font-bold text-lg mb-4">
+                +{formatCurrency(myPlayer.chips)}
+              </p>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowLeaveConfirm(false)}
+                className="flex-1 bg-gray-800 border border-gray-700 text-gray-300
+                  font-bold py-3 rounded-xl hover:bg-gray-700 transition-colors">
+                Stay
+              </button>
+              <button
+                onClick={handleLeave}
+                disabled={leaving}
+                className="flex-1 bg-red-600 text-white font-bold py-3 rounded-xl
+                  hover:bg-red-500 transition-colors disabled:opacity-50
+                  flex items-center justify-center gap-2">
+                {leaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Leave'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
+};
+
+export default PokerGamePage;
