@@ -16,6 +16,7 @@ const gameCards = [
     title: 'Color Prediction',
     desc: 'Predict Red, Green, or Violet',
     icon: Palette,
+    gradient: 'from-red-500 via-green-500 to-violet-500',
     bg: 'from-red-900/30 to-violet-900/30',
     border: 'border-red-500/20',
     emoji: '🎨',
@@ -25,6 +26,7 @@ const gameCards = [
     title: 'Card Battle',
     desc: '2-Player card comparison game',
     icon: Spade,
+    gradient: 'from-blue-500 to-indigo-500',
     bg: 'from-blue-900/30 to-indigo-900/30',
     border: 'border-blue-500/20',
     emoji: '🃏',
@@ -34,37 +36,10 @@ const gameCards = [
     title: 'Dice Game',
     desc: 'Roll 3D dice - Odd or Even',
     icon: Dice5,
+    gradient: 'from-green-500 to-emerald-500',
     bg: 'from-green-900/30 to-emerald-900/30',
     border: 'border-green-500/20',
     emoji: '🎲',
-  },
-  // ── Naye Games ──────────────────────────────────────────
-  {
-    path: '/games/dragon-tiger',
-    title: 'Dragon Tiger',
-    desc: 'Dragon ya Tiger — Highest card jeeta',
-    icon: Spade,
-    bg: 'from-orange-900/30 to-red-900/30',
-    border: 'border-orange-500/20',
-    emoji: '🐉',
-  },
-  {
-    path: '/games/andar-bahar',
-    title: 'Andar Bahar',
-    desc: 'Joker card Andar aayega ya Bahar?',
-    icon: Spade,
-    bg: 'from-purple-900/30 to-pink-900/30',
-    border: 'border-purple-500/20',
-    emoji: '🃏',
-  },
-  {
-    path: '/games/poker',
-    title: 'Poker',
-    desc: 'Texas Hold\'em — Bot ke against',
-    icon: Spade,
-    bg: 'from-emerald-900/30 to-teal-900/30',
-    border: 'border-emerald-500/20',
-    emoji: '♠️',
   },
 ];
 
@@ -171,7 +146,7 @@ export const Dashboard: React.FC = () => {
           <Trophy className="w-5 h-5 text-yellow-400" />
           Play Games
         </h3>
-        <div className="grid gap-4 grid-cols-2 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-3">
           {gameCards.map(({ path, title, desc, icon: Icon, bg, border, emoji }) => (
             <Link key={path} to={path}>
               <motion.div
@@ -181,11 +156,11 @@ export const Dashboard: React.FC = () => {
               >
                 <div className="absolute -right-4 -bottom-4 text-7xl opacity-20">{emoji}</div>
                 <div className="relative">
-                  <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center mb-3 text-2xl">
-                    {emoji}
+                  <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center mb-3">
+                    <Icon className="w-6 h-6 text-white" />
                   </div>
-                  <h4 className="text-base font-bold text-white mb-1">{title}</h4>
-                  <p className="text-xs text-gray-400">{desc}</p>
+                  <h4 className="text-lg font-bold text-white mb-1">{title}</h4>
+                  <p className="text-sm text-gray-400">{desc}</p>
                   <div className="mt-3 flex items-center gap-1 text-yellow-400 text-sm font-medium">
                     Play Now <ChevronRight className="w-4 h-4" />
                   </div>
@@ -210,7 +185,8 @@ export const Dashboard: React.FC = () => {
               <div>
                 <h4 className="font-bold text-white">Refer & Earn ₹50!</h4>
                 <p className="text-sm text-gray-400">Invite friends and earn bonus for each signup</p>
-              </div>
+              
+/div>
             </div>
             <ChevronRight className="w-5 h-5 text-pink-400 flex-shrink-0" />
           </motion.div>
@@ -219,3 +195,5 @@ export const Dashboard: React.FC = () => {
     </motion.div>
   );
 };
+
+Yeh Mera dashboard page hai Yaha game dekha chahiye
