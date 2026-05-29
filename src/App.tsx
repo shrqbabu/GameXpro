@@ -68,7 +68,8 @@ export default function App() {
                 <Route path="/game-room/:roomId" element={<GameRoom />} />
                 <Route path="/games/color-prediction" element={<ColorPrediction />} />
                 <Route path="/games/dice" element={<DiceGame />} />
-                <Route path="/games/dragon-tiger" element={<ProtectedRoute>< DragonTigerPage /></ProtectedRoute>} />
+                <Route path="/games/dragon-tiger" element={<DragonTigerPage />} />
+                
                 <Route path="/games/andar-bahar" element={<ProtectedRoute><AndarBaharPage /></ProtectedRoute>} />
                 <Route path="/games/poker" element={<ProtectedRoute><PokerLobbyPage /></ProtectedRoute>} />
                 <Route path="/games/poker/:tableId" element={<ProtectedRoute><PokerGamePage /></ProtectedRoute>} />
