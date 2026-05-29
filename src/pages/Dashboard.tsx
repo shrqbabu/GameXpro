@@ -195,5 +195,3 @@ export const Dashboard: React.FC = () => {
     </motion.div>
   );
 };
-
-Yeh Mera dashboard page hai Yaha game dekha chahiye
