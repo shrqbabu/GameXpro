@@ -1,18 +1,19 @@
 import {
   doc,
   collection,
-  addDoc,
+  setDoc,
+  getDoc,
   updateDoc,
   onSnapshot,
   runTransaction,
   serverTimestamp,
   query,
   where,
-  orderBy,
   getDocs,
-  getDoc,
+  orderBy,
   limit,
-  Timestamp,
+  increment,
+  arrayUnion,
 } from 'firebase/firestore';
 import { db } from './config';
 import {
