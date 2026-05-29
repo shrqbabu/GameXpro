@@ -1,14 +1,14 @@
 // src/pages/PokerLobbyPage.tsx
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   subscribePokerTables,
   createPokerTable,
   joinPokerTable,
   PokerTable,
-} from '../firebase/games';
-import { formatCurrency, calculateUsableBalance } from '../utils/helpers';
+} from '../../firebase/games';
+import { formatCurrency, calculateUsableBalance } from '../../utils/helpers';
 import {
   Plus, Users, ChevronRight, Loader2, X, Lock,
   Clock, Spade, Trophy, DollarSign, Settings,
