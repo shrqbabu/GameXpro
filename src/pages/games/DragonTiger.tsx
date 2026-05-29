@@ -1,354 +1,614 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { deductFunds, addFunds } from '../../firebase/wallet';
-import toast from 'react-hot-toast';
 
-type DTChoice = 'DRAGON' | 'TIGER' | 'TIE';
-type GamePhase = 'BETTING' | 'DEALING' | 'RESULT';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useAuth } from '../context/AuthContext';
+import {
+  createDragonTigerRound,
+  getActiveDragonTigerGame,
+  subscribeDragonTiger,
+  placeDragonTigerBet,
+  dealDragonTiger,
+  DragonTigerGame,
+  DTBet,
+} from '../firebase/games';
+import CardDisplay from '../components/games/CardDisplay';
+import GameTimer from '../components/games/GameTimer';
+import { formatCurrency, calculateUsableBalance } from '../utils/helpers';
+import {
+  Users, History, Loader2, AlertCircle,
+  CheckCircle, Coins, Flame,
+} from 'lucide-react';
 
-const SUITS = ['♠', '♥', '♦', '♣'];
-const SUIT_COLORS: Record<string, string> = { '♠': '#e2e8f0', '♥': '#f87171', '♦': '#f87171', '♣': '#e2e8f0' };
-const VALUES = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-const BET_AMOUNTS = [10, 50, 100, 500, 1000];
+const BET_CHIPS = [10, 50, 100, 500, 1000];
+const NEXT_ROUND_DELAY = 6000;
 
-function randomCard() {
-  const v = VALUES[Math.floor(Math.random() * VALUES.length)];
-  const s = SUITS[Math.floor(Math.random() * SUITS.length)];
-  const rank = VALUES.indexOf(v) + 1;
-  return { value: v, suit: s, rank };
+interface HistEntry {
+  winner: 'dragon' | 'tiger' | 'tie';
 }
 
-function getWinner(d: { rank: number }, t: { rank: number }): DTChoice {
-  if (d.rank > t.rank) return 'DRAGON';
-  if (t.rank > d.rank) return 'TIGER';
-  return 'TIE';
-}
-
-const PAYOUT: Record<DTChoice, number> = { DRAGON: 2, TIGER: 2, TIE: 8 };
-
-interface PlayingCardProps {
-  card?: { value: string; suit: string } | null;
-  faceDown?: boolean;
-  flip?: boolean;
-}
-
-function PlayingCard({ card, faceDown, flip }: PlayingCardProps) {
-  const isRed = card && (card.suit === '♥' || card.suit === '♦');
-  return (
-    <div className={`card-wrapper ${flip ? 'flip' : ''}`}>
-      <div className="card-inner">
-        <div className="card-back">
-          <div className="card-back-pattern" />
-        </div>
-        <div className="card-front">
-          {card && (
-            <>
-              <span className="card-corner top-left" style={{ color: isRed ? '#f87171' : '#e2e8f0' }}>
-                <span className="card-val">{card.value}</span>
-                <span className="card-suit-sm">{card.suit}</span>
-              </span>
-              <span className="card-center-suit" style={{ color: isRed ? '#f87171' : '#e2e8f0' }}>
-                {card.suit}
-              </span>
-              <span className="card-corner bottom-right" style={{ color: isRed ? '#f87171' : '#e2e8f0' }}>
-                <span className="card-val">{card.value}</span>
-                <span className="card-suit-sm">{card.suit}</span>
-              </span>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export function DragonTiger() {
-  const navigate = useNavigate();
+const DragonTigerPage: React.FC = () => {
   const { user, wallet } = useAuth();
-  const [phase, setPhase] = useState<GamePhase>('BETTING');
+
+  const [gameId, setGameId] = useState<string | null>(null);
+  const [game, setGame] = useState<DragonTigerGame | null>(null);
+  const [loading, setLoading] = useState(true);
   const [betAmount, setBetAmount] = useState(50);
-  const [customBet, setCustomBet] = useState('');
-  const [choice, setChoice] = useState<DTChoice | null>(null);
-  const [dragonCard, setDragonCard] = useState<any>(null);
-  const [tigerCard, setTigerCard] = useState<any>(null);
-  const [winner, setWinner] = useState<DTChoice | null>(null);
-  const [flipDragon, setFlipDragon] = useState(false);
-  const [flipTiger, setFlipTiger] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [resultMsg, setResultMsg] = useState('');
-  const [history, setHistory] = useState<DTChoice[]>([]);
+  const [placing, setPlacing] = useState(false);
+  const [dealing, setDealing] = useState(false);
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const [history, setHistory] = useState<HistEntry[]>([]);
+  const [nextRoundSecs, setNextRoundSecs] = useState<number | null>(null);
 
-  const effectiveBet = customBet ? parseInt(customBet) || 0 : betAmount;
+  const isDealing = useRef(false);
+  const nextRoundTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const handlePlaceBet = async () => {
-    if (!choice) return toast.error('Pehle apna choice chuniye');
-    if (effectiveBet < 10) return toast.error('Minimum bet ₹10 hai');
-    if (!wallet || wallet.totalBalance < effectiveBet) return toast.error('Insufficient balance');
-    if (!user) return;
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
+  const initGame = useCallback(async () => {
     setLoading(true);
     try {
-      await deductFunds(user.uid, effectiveBet, 'GAME_LOSS', `Dragon Tiger bet - ${choice}`);
-      setPhase('DEALING');
-      setFlipDragon(false);
-      setFlipTiger(false);
-      setDragonCard(null);
-      setTigerCard(null);
-      setWinner(null);
-
-      const dc = randomCard();
-      const tc = randomCard();
-
-      setTimeout(() => { setDragonCard(dc); setFlipDragon(true); }, 600);
-      setTimeout(() => { setTigerCard(tc); setFlipTiger(true); }, 1400);
-
-      setTimeout(async () => {
-        const w = getWinner(dc, tc);
-        setWinner(w);
-        setHistory(h => [w, ...h.slice(0, 19)]);
-
-        const won = choice === w;
-        if (won) {
-          const payout = effectiveBet * PAYOUT[choice];
-          await addFunds(user.uid, payout, 'winningBalance', `Dragon Tiger win - ${choice}`);
-          setResultMsg(`🎉 ${w} Jeeta! +₹${payout - effectiveBet} profit`);
-          toast.success(`Aap jeete! ₹${payout} mila`);
-        } else {
-          setResultMsg(`💔 ${w} Jeeta. ₹${effectiveBet} haara`);
-          toast.error(`${w} jeeta`);
-        }
-        setPhase('RESULT');
-        setLoading(false);
-      }, 2800);
+      let id = await getActiveDragonTigerGame();
+      if (!id) id = await createDragonTigerRound();
+      setGameId(id);
     } catch (e: any) {
-      toast.error(e.message || 'Error');
+      showToast(e.message || 'Failed to load', 'error');
+    } finally {
       setLoading(false);
-      setPhase('BETTING');
+    }
+  }, []);
+
+  useEffect(() => {
+    initGame();
+    return () => {
+      if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, [initGame]);
+
+  useEffect(() => {
+    if (!gameId) return;
+    const unsub = subscribeDragonTiger(gameId, (data) => {
+      setGame(data);
+
+      if (data.status === 'result' && !isDealing.current) {
+        if (data.winner) {
+          setHistory((prev) => [{ winner: data.winner! }, ...prev.slice(0, 19)]);
+        }
+
+        let secs = Math.ceil(NEXT_ROUND_DELAY / 1000);
+        setNextRoundSecs(secs);
+        if (countdownRef.current) clearInterval(countdownRef.current);
+        countdownRef.current = setInterval(() => {
+          secs--;
+          setNextRoundSecs(secs > 0 ? secs : null);
+          if (secs <= 0) clearInterval(countdownRef.current!);
+        }, 1000);
+
+        if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+        nextRoundTimer.current = setTimeout(async () => {
+          isDealing.current = false;
+          const newId = await createDragonTigerRound();
+          setGameId(newId);
+          setGame(null);
+        }, NEXT_ROUND_DELAY);
+      }
+    });
+    return () => unsub();
+  }, [gameId]);
+
+  const handleTimerExpire = useCallback(async () => {
+    if (!gameId || isDealing.current) return;
+    isDealing.current = true;
+    setDealing(true);
+    try {
+      await dealDragonTiger(gameId);
+    } catch (e: any) {
+      showToast(e.message || 'Deal failed', 'error');
+      isDealing.current = false;
+    } finally {
+      setDealing(false);
+    }
+  }, [gameId]);
+
+  const handleBet = async (side: 'dragon' | 'tiger' | 'tie') => {
+    if (!user || !gameId) return;
+    if (!wallet) { showToast('Wallet not loaded', 'error'); return; }
+    if (game?.status !== 'betting') { showToast('Betting is closed', 'error'); return; }
+
+    const myBet = game?.bets?.find((b) => b.uid === user.uid);
+    if (myBet) { showToast('Already placed bet', 'error'); return; }
+
+    const usable = calculateUsableBalance(wallet);
+    if (usable < betAmount) { showToast('Insufficient balance', 'error'); return; }
+
+    setPlacing(true);
+    try {
+      await placeDragonTigerBet(
+        gameId, user.uid, user.name || 'Player', betAmount, side
+      );
+      const emoji = side === 'dragon' ? '🐉' : side === 'tiger' ? '🐯' : '🤝';
+      showToast(`${emoji} ₹${betAmount} on ${side.toUpperCase()}`, 'success');
+    } catch (e: any) {
+      showToast(e.message || 'Bet failed', 'error');
+    } finally {
+      setPlacing(false);
     }
   };
 
-  const handleReset = () => {
-    setPhase('BETTING');
-    setChoice(null);
-    setDragonCard(null);
-    setTigerCard(null);
-    setWinner(null);
-    setFlipDragon(false);
-    setFlipTiger(false);
-    setResultMsg('');
+  const myBet = game?.bets?.find((b) => b.uid === user?.uid);
+  const usable = wallet ? calculateUsableBalance(wallet) : 0;
+
+  const getWinAmount = (side: 'dragon' | 'tiger' | 'tie', amount: number) => {
+    if (side === 'tie') return amount * 8;
+    return Math.floor(amount * 1.95);
   };
 
-  const balance = wallet?.totalBalance ?? 0;
+  const getResultInfo = () => {
+    if (!game?.winner || !myBet) return null;
+    if (myBet.side === game.winner) {
+      return {
+        won: true,
+        amount: getWinAmount(myBet.side, myBet.amount),
+      };
+    }
+    if (game.winner === 'tie' && myBet.side !== 'tie') {
+      return { won: false, amount: -Math.floor(myBet.amount * 0.5), partial: true };
+    }
+    return { won: false, amount: -myBet.amount };
+  };
+
+  const result = getResultInfo();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-red-500 border-t-transparent
+            rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-400">Loading Dragon Tiger...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="dt-root">
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Raleway:wght@300;400;500&display=swap');
-        .dt-root{min-height:100vh;background:radial-gradient(ellipse at top,#0d1b2a 0%,#050d14 60%,#000 100%);font-family:'Raleway',sans-serif;color:#e2e8f0;padding-bottom:40px;}
-        .dt-header{display:flex;align-items:center;gap:12px;padding:20px 24px;border-bottom:1px solid rgba(212,175,55,0.2);background:rgba(0,0,0,0.4);backdrop-filter:blur(10px);position:sticky;top:0;z-index:10;}
-        .dt-back{background:none;border:1px solid rgba(212,175,55,0.3);color:#d4af37;padding:8px 16px;border-radius:8px;cursor:pointer;font-family:'Raleway',sans-serif;font-size:13px;transition:all 0.2s;}
-        .dt-back:hover{background:rgba(212,175,55,0.1);border-color:#d4af37;}
-        .dt-title{font-family:'Cinzel',serif;font-size:22px;font-weight:800;background:linear-gradient(135deg,#d4af37,#f5e070,#d4af37);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:2px;}
-        .dt-balance{margin-left:auto;background:rgba(212,175,55,0.1);border:1px solid rgba(212,175,55,0.3);padding:6px 14px;border-radius:20px;font-size:13px;color:#d4af37;font-weight:500;}
-        .dt-table{max-width:680px;margin:32px auto 0;padding:0 16px;}
-        .felt{background:radial-gradient(ellipse,#0a3d1f 0%,#062710 70%,#041a0c 100%);border:3px solid #d4af37;border-radius:24px;padding:32px 24px;position:relative;box-shadow:0 0 60px rgba(212,175,55,0.15),inset 0 0 40px rgba(0,0,0,0.5);}
-        .felt::before{content:'';position:absolute;inset:6px;border:1px solid rgba(212,175,55,0.2);border-radius:18px;pointer-events:none;}
-        .dt-zones{display:flex;gap:20px;justify-content:center;margin-bottom:28px;}
-        .dt-zone{flex:1;max-width:180px;text-align:center;}
-        .zone-label{font-family:'Cinzel',serif;font-size:11px;letter-spacing:3px;color:#d4af37;opacity:0.7;margin-bottom:12px;text-transform:uppercase;}
-        .zone-name{font-family:'Cinzel',serif;font-size:28px;font-weight:800;letter-spacing:2px;margin-bottom:16px;}
-        .dragon-name{background:linear-gradient(135deg,#ff6b35,#ff4500);-webkit-background-clip:text;-webkit-text-fill-color:transparent;text-shadow:none;}
-        .tiger-name{background:linear-gradient(135deg,#38bdf8,#0ea5e9);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
-        .tie-zone{flex:0 0 90px;display:flex;flex-direction:column;align-items:center;justify-content:center;}
-        .tie-name{font-family:'Cinzel',serif;font-size:14px;color:#d4af37;letter-spacing:2px;margin-bottom:8px;}
-        .tie-payout{font-size:11px;color:rgba(212,175,55,0.6);}
+    <div className="min-h-screen bg-gray-950 text-white">
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50
+          flex items-center gap-2 px-5 py-3 rounded-2xl shadow-2xl border text-sm font-medium
+          ${toast.type === 'success'
+            ? 'bg-emerald-900/95 border-emerald-500/50 text-emerald-300'
+            : 'bg-red-900/95 border-red-500/50 text-red-300'}`}>
+          {toast.type === 'success'
+            ? <CheckCircle className="w-4 h-4" />
+            : <AlertCircle className="w-4 h-4" />}
+          {toast.msg}
+        </div>
+      )}
 
-        /* Card */
-        .card-wrapper{width:80px;height:112px;margin:0 auto;perspective:600px;cursor:default;}
-        .card-inner{width:100%;height:100%;position:relative;transform-style:preserve-3d;transition:transform 0.7s cubic-bezier(.4,0,.2,1);}
-        .card-wrapper.flip .card-inner{transform:rotateY(180deg);}
-        .card-back,.card-front{position:absolute;inset:0;backface-visibility:hidden;border-radius:10px;border:2px solid rgba(212,175,55,0.6);}
-        .card-back{background:linear-gradient(135deg,#1a0a3e,#0d1b2a);display:flex;align-items:center;justify-content:center;}
-        .card-back-pattern{width:60px;height:88px;border:2px solid rgba(212,175,55,0.3);border-radius:6px;background:repeating-linear-gradient(45deg,rgba(212,175,55,0.05) 0px,rgba(212,175,55,0.05) 2px,transparent 2px,transparent 8px);}
-        .card-front{background:linear-gradient(135deg,#f8f4e8,#fffef5);transform:rotateY(180deg);position:relative;overflow:hidden;}
-        .card-corner{position:absolute;display:flex;flex-direction:column;align-items:center;line-height:1;}
-        .card-corner.top-left{top:4px;left:6px;}
-        .card-corner.bottom-right{bottom:4px;right:6px;transform:rotate(180deg);}
-        .card-val{font-family:'Cinzel',serif;font-size:13px;font-weight:800;}
-        .card-suit-sm{font-size:10px;}
-        .card-center-suit{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:32px;}
-        .empty-card{width:80px;height:112px;margin:0 auto;border:2px dashed rgba(212,175,55,0.2);border-radius:10px;display:flex;align-items:center;justify-content:center;}
-        .empty-card-inner{width:50px;height:70px;border:1px solid rgba(212,175,55,0.1);border-radius:6px;}
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-black flex items-center gap-2">
+              🐉 Dragon Tiger
+            </h1>
+            <p className="text-gray-500 text-sm mt-0.5">
+              Higher card wins • Tie pays 8x
+            </p>
+          </div>
+          <div className="bg-gray-900 border border-gray-700 rounded-xl px-4 py-2">
+            <p className="text-gray-500 text-xs">Balance</p>
+            <p className="text-yellow-400 font-bold">{formatCurrency(usable)}</p>
+          </div>
+        </div>
 
-        /* Bet buttons */
-        .bet-choice{display:flex;gap:12px;justify-content:center;margin:24px 0 20px;}
-        .bet-btn{flex:1;max-width:140px;padding:14px 8px;border-radius:12px;border:2px solid transparent;cursor:pointer;font-family:'Cinzel',serif;font-size:14px;font-weight:600;letter-spacing:1px;transition:all 0.2s;background:rgba(0,0,0,0.4);}
-        .bet-btn.dragon{border-color:rgba(255,107,53,0.4);color:#ff6b35;}
-        .bet-btn.dragon:hover,.bet-btn.dragon.selected{background:linear-gradient(135deg,rgba(255,107,53,0.25),rgba(255,69,0,0.15));border-color:#ff6b35;box-shadow:0 0 20px rgba(255,107,53,0.3);}
-        .bet-btn.tiger{border-color:rgba(56,189,248,0.4);color:#38bdf8;}
-        .bet-btn.tiger:hover,.bet-btn.tiger.selected{background:linear-gradient(135deg,rgba(56,189,248,0.25),rgba(14,165,233,0.15));border-color:#38bdf8;box-shadow:0 0 20px rgba(56,189,248,0.3);}
-        .bet-btn.tie{border-color:rgba(212,175,55,0.4);color:#d4af37;}
-        .bet-btn.tie:hover,.bet-btn.tie.selected{background:linear-gradient(135deg,rgba(212,175,55,0.25),rgba(212,175,55,0.1));border-color:#d4af37;box-shadow:0 0 20px rgba(212,175,55,0.3);}
-        .bet-btn.selected{transform:scale(1.04);}
-        .bet-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none;}
-        .payout-tag{font-size:10px;color:inherit;opacity:0.7;margin-top:2px;}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* LEFT: Game Board */}
+          <div className="lg:col-span-2 space-y-4">
 
-        .chip-row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:16px;}
-        .chip{width:48px;height:48px;border-radius:50%;border:3px solid;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;transition:all 0.2s;position:relative;}
-        .chip:hover,.chip.active{transform:scale(1.12) translateY(-3px);box-shadow:0 6px 20px rgba(0,0,0,0.5);}
-        .chip:disabled{opacity:0.4;cursor:not-allowed;transform:none;}
-        .chip-10{background:radial-gradient(circle,#dc2626,#991b1b);border-color:#ef4444;color:#fff;}
-        .chip-50{background:radial-gradient(circle,#1d4ed8,#1e3a8a);border-color:#3b82f6;color:#fff;}
-        .chip-100{background:radial-gradient(circle,#15803d,#14532d);border-color:#22c55e;color:#fff;}
-        .chip-500{background:radial-gradient(circle,#7c3aed,#4c1d95);border-color:#8b5cf6;color:#fff;}
-        .chip-1000{background:radial-gradient(circle,#d4af37,#92710a);border-color:#f5e070;color:#000;}
+            {/* Status Bar */}
+            <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-4
+              flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Flame className={`w-5 h-5
+                  ${game?.status === 'betting' ? 'text-orange-400 animate-pulse' :
+                    game?.status === 'result' ? 'text-yellow-400' : 'text-gray-400'}`} />
+                <span className="font-semibold text-sm">
+                  {game?.status === 'betting' && '🎲 Place your bets!'}
+                  {game?.status === 'dealing' && '🃏 Revealing cards...'}
+                  {game?.status === 'result' && (
+                    <span className={
+                      game.winner === 'dragon' ? 'text-red-400' :
+                      game.winner === 'tiger' ? 'text-orange-400' : 'text-yellow-400'
+                    }>
+                      🏆 {game.winner === 'tie' ? 'TIE GAME!' : `${game.winner?.toUpperCase()} Wins!`}
+                    </span>
+                  )}
+                </span>
+              </div>
 
-        .bet-display{text-align:center;margin-bottom:16px;}
-        .bet-display-label{font-size:11px;color:rgba(212,175,55,0.6);letter-spacing:2px;text-transform:uppercase;}
-        .bet-display-amount{font-family:'Cinzel',serif;font-size:26px;font-weight:800;color:#d4af37;}
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-gray-600 text-xs">Pot</p>
+                  <p className="text-yellow-400 font-bold text-sm">
+                    {formatCurrency(game?.pot || 0)}
+                  </p>
+                </div>
 
-        .custom-bet{display:flex;align-items:center;gap:8px;justify-content:center;margin-bottom:20px;}
-        .custom-bet input{background:rgba(255,255,255,0.05);border:1px solid rgba(212,175,55,0.3);color:#e2e8f0;padding:8px 12px;border-radius:8px;font-family:'Raleway',sans-serif;font-size:14px;width:100px;text-align:center;outline:none;}
-        .custom-bet input:focus{border-color:#d4af37;}
-        .custom-bet-label{font-size:12px;color:rgba(212,175,55,0.6);}
+                {game?.status === 'betting' && game?.bettingEndsAt && (
+                  <GameTimer
+                    endsAt={game.bettingEndsAt instanceof Date
+                      ? game.bettingEndsAt
+                      : game.bettingEndsAt?.toDate
+                      ? game.bettingEndsAt.toDate()
+                      : new Date(game.bettingEndsAt)}
+                    onExpire={handleTimerExpire}
+                  />
+                )}
 
-        .place-btn{width:100%;padding:16px;border-radius:12px;border:none;background:linear-gradient(135deg,#d4af37,#f5e070,#d4af37);color:#000;font-family:'Cinzel',serif;font-size:16px;font-weight:800;letter-spacing:2px;cursor:pointer;transition:all 0.2s;box-shadow:0 4px 20px rgba(212,175,55,0.3);}
-        .place-btn:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(212,175,55,0.4);}
-        .place-btn:disabled{opacity:0.4;cursor:not-allowed;transform:none;}
+                {game?.status === 'result' && nextRoundSecs !== null && (
+                  <div className="text-sm text-gray-400">
+                    Next in <span className="text-yellow-400 font-bold">{nextRoundSecs}s</span>
+                  </div>
+                )}
 
-        .result-overlay{text-align:center;padding:20px 0;}
-        .result-text{font-family:'Cinzel',serif;font-size:20px;font-weight:800;margin-bottom:4px;}
-        .result-win{color:#22c55e;}
-        .result-lose{color:#ef4444;}
-        .result-sub{font-size:14px;color:rgba(226,232,240,0.7);margin-bottom:20px;}
-        .play-again{background:rgba(212,175,55,0.1);border:2px solid #d4af37;color:#d4af37;padding:12px 32px;border-radius:10px;cursor:pointer;font-family:'Cinzel',serif;font-size:14px;font-weight:600;letter-spacing:1px;transition:all 0.2s;}
-        .play-again:hover{background:rgba(212,175,55,0.2);}
-
-        .winner-glow-dragon{box-shadow:0 0 40px rgba(255,107,53,0.5)!important;border-color:#ff6b35!important;}
-        .winner-glow-tiger{box-shadow:0 0 40px rgba(56,189,248,0.5)!important;border-color:#38bdf8!important;}
-        .winner-glow-tie{box-shadow:0 0 40px rgba(212,175,55,0.5)!important;border-color:#d4af37!important;}
-
-        .history-strip{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:20px;padding-top:16px;border-top:1px solid rgba(212,175,55,0.1);}
-        .hist-dot{width:28px;height:28px;border-radius:50%;font-family:'Cinzel',serif;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid;}
-        .hist-d{background:rgba(255,107,53,0.15);border-color:rgba(255,107,53,0.5);color:#ff6b35;}
-        .hist-t{background:rgba(56,189,248,0.15);border-color:rgba(56,189,248,0.5);color:#38bdf8;}
-        .hist-tie{background:rgba(212,175,55,0.15);border-color:rgba(212,175,55,0.5);color:#d4af37;}
-        .history-label{width:100%;text-align:center;font-size:10px;color:rgba(212,175,55,0.4);letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;}
-
-        .dealing-msg{text-align:center;padding:12px;color:#d4af37;font-family:'Cinzel',serif;font-size:14px;letter-spacing:2px;animation:pulse 1s infinite;}
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
-        @keyframes dealIn{from{opacity:0;transform:translateY(-20px)}to{opacity:1;transform:translateY(0)}}
-        .card-appear{animation:dealIn 0.4s ease-out;}
-      `}</style>
-
-      <div className="dt-header">
-        <button className="dt-back" onClick={() => navigate('/dashboard')}>← Back</button>
-        <span className="dt-title">🐉 Dragon Tiger 🐯</span>
-        <span className="dt-balance">₹{balance.toLocaleString('en-IN')}</span>
-      </div>
-
-      <div className="dt-table">
-        <div className="felt">
-          {/* Card zones */}
-          <div className="dt-zones">
-            <div className="dt-zone">
-              <div className="zone-label">1x Payout</div>
-              <div className="zone-name dragon-name">Dragon</div>
-              <div className={`card-appear ${winner === 'DRAGON' ? 'winner-glow-dragon' : ''}`} style={{ borderRadius: 10 }}>
-                {dragonCard && flipDragon
-                  ? <PlayingCard card={dragonCard} flip={flipDragon} />
-                  : phase !== 'BETTING'
-                    ? <PlayingCard faceDown flip={false} />
-                    : <div className="empty-card"><div className="empty-card-inner" /></div>}
+                {game?.status === 'dealing' && (
+                  <Loader2 className="w-5 h-5 text-amber-400 animate-spin" />
+                )}
               </div>
             </div>
 
-            <div className="dt-zone tie-zone" style={{ justifyContent: 'flex-end', paddingBottom: 16 }}>
-              <div className="tie-name" style={{ fontFamily: "'Cinzel',serif", fontSize: 14, color: '#d4af37', letterSpacing: 2, marginBottom: 4 }}>TIE</div>
-              <div className="tie-payout" style={{ fontSize: 11, color: 'rgba(212,175,55,0.6)' }}>8x</div>
+            {/* MAIN TABLE */}
+            <div className="bg-gradient-to-br from-slate-900 via-gray-900 to-slate-900
+              border border-gray-700/50 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+
+              {/* Table pattern */}
+              <div className="absolute inset-0 opacity-3"
+                style={{
+                  backgroundImage: `repeating-linear-gradient(45deg,
+                    transparent, transparent 35px, rgba(255,255,255,.03) 35px,
+                    rgba(255,255,255,.03) 70px)`,
+                }} />
+
+              <div className="grid grid-cols-3 gap-4 items-center relative">
+                {/* Dragon */}
+                <div className={`rounded-2xl p-5 border-2 text-center transition-all duration-500
+                  ${game?.winner === 'dragon'
+                    ? 'border-yellow-400 bg-yellow-400/10 shadow-xl shadow-yellow-400/20'
+                    : myBet?.side === 'dragon'
+                    ? 'border-red-500 bg-red-500/10'
+                    : 'border-gray-700 bg-gray-800/30'}`}>
+                  <div className="text-5xl mb-3 leading-none">🐉</div>
+                  <h3 className={`font-black text-xl mb-3
+                    ${game?.winner === 'dragon' ? 'text-yellow-400' : 'text-red-400'}`}>
+                    DRAGON
+                  </h3>
+
+                  <div className="flex justify-center mb-3">
+                    {game?.dragonCard ? (
+                      <div className="relative">
+                        {game.winner === 'dragon' && (
+                          <div className="absolute -inset-2 bg-yellow-400/30
+                            rounded-xl blur-lg animate-pulse" />
+                        )}
+                        <CardDisplay card={game.dragonCard} size="lg" animate />
+                      </div>
+                    ) : (
+                      <div className={`w-20 h-28 rounded-xl border-2 border-dashed
+                        flex items-center justify-center transition-all
+                        ${game?.status === 'dealing'
+                          ? 'border-red-500/40 bg-red-500/5 animate-pulse'
+                          : 'border-gray-700'}`}>
+                        <span className="text-4xl text-gray-700">?</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {game?.winner === 'dragon' && (
+                    <div className="text-yellow-400 text-xs font-bold">🏆 WINNER</div>
+                  )}
+                  {myBet?.side === 'dragon' && (
+                    <div className="text-red-400 text-xs mt-1">
+                      Your bet: {formatCurrency(myBet.amount)}
+                    </div>
+                  )}
+                </div>
+
+                {/* Center */}
+                <div className="text-center">
+                  {game?.status === 'result' && game?.winner === 'tie' ? (
+                    <div>
+                      <div className="text-5xl mb-2">🤝</div>
+                      <div className="text-yellow-400 font-black text-2xl">TIE</div>
+                      <div className="text-yellow-300 text-sm">8× Payout</div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="text-gray-700 font-black text-3xl mb-2">VS</div>
+                      {game?.dragonCard && game?.tigerCard && (
+                        <div className="space-y-1 text-xs text-gray-600">
+                          <div>🐉 {game.dragonCard.value}</div>
+                          <div>🐯 {game.tigerCard.value}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Tiger */}
+                <div className={`rounded-2xl p-5 border-2 text-center transition-all duration-500
+                  ${game?.winner === 'tiger'
+                    ? 'border-yellow-400 bg-yellow-400/10 shadow-xl shadow-yellow-400/20'
+                    : myBet?.side === 'tiger'
+                    ? 'border-orange-500 bg-orange-500/10'
+                    : 'border-gray-700 bg-gray-800/30'}`}>
+                  <div className="text-5xl mb-3 leading-none">🐯</div>
+                  <h3 className={`font-black text-xl mb-3
+                    ${game?.winner === 'tiger' ? 'text-yellow-400' : 'text-orange-400'}`}>
+                    TIGER
+                  </h3>
+
+                  <div className="flex justify-center mb-3">
+                    {game?.tigerCard ? (
+                      <div className="relative">
+                        {game.winner === 'tiger' && (
+                          <div className="absolute -inset-2 bg-yellow-400/30
+                            rounded-xl blur-lg animate-pulse" />
+                        )}
+                        <CardDisplay card={game.tigerCard} size="lg" animate />
+                      </div>
+                    ) : (
+                      <div className={`w-20 h-28 rounded-xl border-2 border-dashed
+                        flex items-center justify-center transition-all
+                        ${game?.status === 'dealing'
+                          ? 'border-orange-500/40 bg-orange-500/5 animate-pulse'
+                          : 'border-gray-700'}`}>
+                        <span className="text-4xl text-gray-700">?</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {game?.winner === 'tiger' && (
+                    <div className="text-yellow-400 text-xs font-bold">🏆 WINNER</div>
+                  )}
+                  {myBet?.side === 'tiger' && (
+                    <div className="text-orange-400 text-xs mt-1">
+                      Your bet: {formatCurrency(myBet.amount)}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
-            <div className="dt-zone">
-              <div className="zone-label">1x Payout</div>
-              <div className="zone-name tiger-name">Tiger</div>
-              <div className={`card-appear ${winner === 'TIGER' ? 'winner-glow-tiger' : ''}`} style={{ borderRadius: 10 }}>
-                {tigerCard && flipTiger
-                  ? <PlayingCard card={tigerCard} flip={flipTiger} />
-                  : phase !== 'BETTING'
-                    ? <PlayingCard faceDown flip={false} />
-                    : <div className="empty-card"><div className="empty-card-inner" /></div>}
+            {/* Result Banner */}
+            {game?.status === 'result' && myBet && result && (
+              <div className={`rounded-2xl p-5 border-2 text-center
+                ${result.won
+                  ? 'bg-emerald-900/40 border-emerald-500/50 shadow-lg shadow-emerald-500/20'
+                  : result.partial
+                  ? 'bg-amber-900/40 border-amber-500/50'
+                  : 'bg-red-900/40 border-red-500/50'}`}>
+                {result.won ? (
+                  <>
+                    <p className="text-4xl mb-2">🎉</p>
+                    <p className="text-emerald-400 font-black text-2xl">You Won!</p>
+                    <p className="text-emerald-300 text-lg mt-1">
+                      +{formatCurrency(result.amount)}
+                    </p>
+                  </>
+                ) : result.partial ? (
+                  <>
+                    <p className="text-4xl mb-2">🤝</p>
+                    <p className="text-amber-400 font-black text-xl">It's a Tie!</p>
+                    <p className="text-amber-300 mt-1">
+                      Returned: {formatCurrency(Math.floor(myBet.amount * 0.5))}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-4xl mb-2">😔</p>
+                    <p className="text-red-400 font-black text-2xl">Better Luck Next Time</p>
+                    <p className="text-red-300 mt-1">-{formatCurrency(myBet.amount)}</p>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Bet Panel */}
+            {game?.status === 'betting' && (
+              <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-5">
+                <h3 className="font-bold flex items-center gap-2 mb-4">
+                  <Coins className="w-4 h-4 text-yellow-400" />
+                  Place Your Bet
+                </h3>
+
+                {myBet ? (
+                  <div className="text-center py-5">
+                    <p className="text-gray-400 text-sm mb-3">You bet on:</p>
+                    <div className="inline-flex items-center gap-3 px-6 py-3
+                      rounded-2xl bg-gray-800 border border-gray-600 font-black text-xl">
+                      <span>
+                        {myBet.side === 'dragon' ? '🐉' : myBet.side === 'tiger' ? '🐯' : '🤝'}
+                      </span>
+                      <span>{myBet.side.toUpperCase()}</span>
+                      <span className="text-yellow-400">{formatCurrency(myBet.amount)}</span>
+                    </div>
+                    <p className="text-gray-600 text-xs mt-2">
+                      Potential win: {formatCurrency(getWinAmount(myBet.side, myBet.amount))}
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Chip Selector */}
+                    <div className="mb-5">
+                      <p className="text-gray-500 text-xs mb-2 uppercase tracking-wider">
+                        Select chip
+                      </p>
+                      <div className="flex gap-2 flex-wrap">
+                        {BET_CHIPS.map((chip) => (
+                          <button
+                            key={chip}
+                            onClick={() => setBetAmount(chip)}
+                            className={`flex-1 min-w-[55px] py-2.5 rounded-xl
+                              text-sm font-bold transition-all border-2
+                              ${betAmount === chip
+                                ? 'bg-yellow-500 border-yellow-400 text-gray-900 scale-105 shadow-lg shadow-yellow-500/30'
+                                : 'bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500'}`}>
+                            ₹{chip >= 1000 ? `${chip / 1000}K` : chip}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Bet Buttons */}
+                    <div className="grid grid-cols-3 gap-3">
+                      <button
+                        onClick={() => handleBet('dragon')}
+                        disabled={placing || !user}
+                        className="bg-gradient-to-b from-red-700 to-red-900
+                          border border-red-600/40 text-white font-black py-5
+                          rounded-2xl hover:from-red-600 hover:to-red-800
+                          disabled:opacity-40 transition-all active:scale-95
+                          flex flex-col items-center gap-1
+                          hover:shadow-lg hover:shadow-red-500/30">
+                        <span className="text-3xl">🐉</span>
+                        <span className="text-sm">Dragon</span>
+                        <span className="text-red-300 text-xs">1.95×</span>
+                        <span className="text-yellow-300 text-xs font-normal">
+                          +{formatCurrency(Math.floor(betAmount * 1.95))}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => handleBet('tie')}
+                        disabled={placing || !user}
+                        className="bg-gradient-to-b from-yellow-600 to-yellow-800
+                          border border-yellow-500/40 text-gray-900 font-black py-5
+                          rounded-2xl hover:from-yellow-500 hover:to-yellow-700
+                          disabled:opacity-40 transition-all active:scale-95
+                          flex flex-col items-center gap-1
+                          hover:shadow-lg hover:shadow-yellow-500/30">
+                        <span className="text-3xl">🤝</span>
+                        <span className="text-sm">Tie</span>
+                        <span className="text-yellow-900 text-xs">8×</span>
+                        <span className="text-yellow-900 text-xs font-normal">
+                          +{formatCurrency(betAmount * 8)}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => handleBet('tiger')}
+                        disabled={placing || !user}
+                        className="bg-gradient-to-b from-orange-700 to-orange-900
+                          border border-orange-600/40 text-white font-black py-5
+                          rounded-2xl hover:from-orange-600 hover:to-orange-800
+                          disabled:opacity-40 transition-all active:scale-95
+                          flex flex-col items-center gap-1
+                          hover:shadow-lg hover:shadow-orange-500/30">
+                        <span className="text-3xl">🐯</span>
+                        <span className="text-sm">Tiger</span>
+                        <span className="text-orange-300 text-xs">1.95×</span>
+                        <span className="text-yellow-300 text-xs font-normal">
+                          +{formatCurrency(Math.floor(betAmount * 1.95))}
+                        </span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT Sidebar */}
+          <div className="space-y-4">
+            {/* Live Bets */}
+            <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-4">
+              <h3 className="font-bold flex items-center gap-2 mb-3 text-sm">
+                <Users className="w-4 h-4 text-red-400" />
+                Live Bets
+                <span className="ml-auto text-xs text-gray-600">
+                  {game?.bets?.length || 0}
+                </span>
+              </h3>
+              <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                {!game?.bets?.length ? (
+                  <div className="text-center py-6 text-gray-700 text-sm">
+                    No bets yet
+                  </div>
+                ) : (
+                  game.bets.map((bet: DTBet, i) => (
+                    <div key={i} className="flex items-center justify-between
+                      bg-gray-800/60 rounded-xl px-3 py-2 text-xs">
+                      <span className="text-gray-300 truncate max-w-[70px]">{bet.name}</span>
+                      <span className={
+                        bet.side === 'dragon' ? 'text-red-400' :
+                        bet.side === 'tiger' ? 'text-orange-400' : 'text-yellow-400'}>
+                        {bet.side === 'dragon' ? '🐉' : bet.side === 'tiger' ? '🐯' : '🤝'}
+                      </span>
+                      <span className="text-yellow-400 font-bold">₹{bet.amount}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* History */}
+            <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-4">
+              <h3 className="font-bold flex items-center gap-2 mb-3 text-sm">
+                <History className="w-4 h-4 text-yellow-400" />
+                History
+              </h3>
+              <div className="flex flex-wrap gap-1.5">
+                {!history.length ? (
+                  <div className="text-gray-700 text-sm w-full text-center py-4">
+                    No history
+                  </div>
+                ) : (
+                  history.map((h, i) => (
+                    <span key={i} className={`text-xs font-bold px-2 py-1
+                      rounded-full border
+                      ${h.winner === 'dragon'
+                        ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                        : h.winner === 'tiger'
+                        ? 'bg-orange-500/10 text-orange-400 border-orange-500/20'
+                        : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'}`}>
+                      {h.winner === 'dragon' ? '🐉' : h.winner === 'tiger' ? '🐯' : '🤝'}
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Payouts */}
+            <div className="bg-gray-900 border border-gray-700/50 rounded-2xl p-4">
+              <h3 className="font-bold text-sm mb-3">Payouts</h3>
+              <div className="space-y-2 text-xs">
+                {[
+                  { emoji: '🐉', label: 'Dragon', payout: '1.95×' },
+                  { emoji: '🐯', label: 'Tiger', payout: '1.95×' },
+                  { emoji: '🤝', label: 'Tie', payout: '8×' },
+                ].map(({ emoji, label, payout }) => (
+                  <div key={label} className="flex items-center justify-between
+                    bg-gray-800/50 rounded-xl px-3 py-2">
+                    <span>{emoji} {label}</span>
+                    <span className="text-white font-bold">{payout}</span>
+                  </div>
+                ))}
+                <div className="text-gray-600 text-xs pt-1 border-t border-gray-800">
+                  On Tie: Non-tie bets get 50% back
+                </div>
               </div>
             </div>
           </div>
-
-          {phase === 'DEALING' && <div className="dealing-msg">🃏 Cards deal ho rahi hain...</div>}
-
-          {phase === 'RESULT' && (
-            <div className="result-overlay">
-              <div className={`result-text ${resultMsg.includes('🎉') ? 'result-win' : 'result-lose'}`}>
-                {resultMsg.includes('🎉') ? '🎉 Aap Jeete!' : '💔 Better Luck Next Time'}
-              </div>
-              <div className="result-sub">{resultMsg}</div>
-              <button className="play-again" onClick={handleReset}>Phir Khelo</button>
-            </div>
-          )}
-
-          {phase === 'BETTING' && (
-            <>
-              {/* Choice buttons */}
-              <div className="bet-choice">
-                <button className={`bet-btn dragon ${choice === 'DRAGON' ? 'selected' : ''}`} onClick={() => setChoice('DRAGON')}>
-                  🐉 Dragon<div className="payout-tag">2x Payout</div>
-                </button>
-                <button className={`bet-btn tie ${choice === 'TIE' ? 'selected' : ''}`} onClick={() => setChoice('TIE')} style={{ flex: '0 0 80px', maxWidth: 80 }}>
-                  TIE<div className="payout-tag">8x</div>
-                </button>
-                <button className={`bet-btn tiger ${choice === 'TIGER' ? 'selected' : ''}`} onClick={() => setChoice('TIGER')}>
-                  🐯 Tiger<div className="payout-tag">2x Payout</div>
-                </button>
-              </div>
-
-              {/* Chips */}
-              <div className="chip-row">
-                {BET_AMOUNTS.map(a => (
-                  <button key={a} className={`chip chip-${a} ${!customBet && betAmount === a ? 'active' : ''}`}
-                    onClick={() => { setBetAmount(a); setCustomBet(''); }}>
-                    {a >= 1000 ? '1K' : a}
-                  </button>
-                ))}
-              </div>
-
-              <div className="bet-display">
-                <div className="bet-display-label">Aapka Bet</div>
-                <div className="bet-display-amount">₹{effectiveBet.toLocaleString('en-IN')}</div>
-              </div>
-
-              <div className="custom-bet">
-                <span className="custom-bet-label">Custom:</span>
-                <input type="number" placeholder="Amount" value={customBet}
-                  onChange={e => setCustomBet(e.target.value)} min={10} />
-              </div>
-
-              <button className="place-btn" onClick={handlePlaceBet} disabled={loading || !choice}>
-                {loading ? 'Processing...' : `BET LAGAO — ₹${effectiveBet}`}
-              </button>
-            </>
-          )}
-
-          {/* History */}
-          {history.length > 0 && (
-            <div className="history-strip">
-              <div className="history-label">Last Results</div>
-              {history.map((h, i) => (
-                <div key={i} className={`hist-dot ${h === 'DRAGON' ? 'hist-d' : h === 'TIGER' ? 'hist-t' : 'hist-tie'}`}>
-                  {h === 'DRAGON' ? 'D' : h === 'TIGER' ? 'T' : 'Ti'}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default DragonTigerPage;
