@@ -1,4 +1,4 @@
-// src/components/games/CardDisplay.tsx
+
 import React from 'react';
 import { Card } from '../../firebase/games';
 
