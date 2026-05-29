@@ -654,4 +654,4 @@ const AndarBaharPage: React.FC = () => {
   );
 };
 
-export default AndarBahar;
+export default AndarBaharPage;
