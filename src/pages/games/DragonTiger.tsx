@@ -611,4 +611,4 @@ const DragonTigerPage: React.FC = () => {
   );
 };
 
-export default DragonTiger;
+export default DragonTigerPage;
