@@ -6,6 +6,12 @@ import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute, AdminRoute, PublicRoute } from './components/ProtectedRoute';
 import { MainLayout } from './components/Layout/MainLayout';
 
+import { DragonTiger } from './pages/games/DragonTiger';
+import { AndarBahar } from './pages/games/AndarBahar';
+import { PokerGame } from './pages/games/PokerGame';
+
+
+
 // Pages
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
@@ -61,7 +67,9 @@ export default function App() {
                 <Route path="/game-room/:roomId" element={<GameRoom />} />
                 <Route path="/games/color-prediction" element={<ColorPrediction />} />
                 <Route path="/games/dice" element={<DiceGame />} />
-
+                <Route path="/games/dragon-tiger" element={<DragonTiger />} />
+                <Route path="/games/andar-bahar" element={<AndarBahar />} />
+                <Route path="/games/poker" element={<PokerGame />} />
                 {/* Admin routes */}
                 <Route element={<AdminRoute />}>
                   <Route path="/admin" element={<AdminDashboard />} />
