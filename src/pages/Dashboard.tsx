@@ -185,8 +185,7 @@ export const Dashboard: React.FC = () => {
               <div>
                 <h4 className="font-bold text-white">Refer & Earn ₹50!</h4>
                 <p className="text-sm text-gray-400">Invite friends and earn bonus for each signup</p>
-              
-/div>
+              </div>
             </div>
             <ChevronRight className="w-5 h-5 text-pink-400 flex-shrink-0" />
           </motion.div>
