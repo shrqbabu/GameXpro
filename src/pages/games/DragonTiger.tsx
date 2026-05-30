@@ -20,12 +20,13 @@ import {
 
 const BET_CHIPS = [10, 50, 100, 500, 1000];
 const NEXT_ROUND_DELAY = 8000;
-const navigate = useNavigate();
+
 
 interface HistEntry { winner: 'dragon' | 'tiger' | 'tie'; roundNumber: number; }
 
 const DragonTigerPage: React.FC = () => {
   const { user, wallet } = useAuth();
+  const navigate = useNavigate();
 
   const [gameId, setGameId] = useState<string | null>(null);
   const [game, setGame] = useState<DragonTigerGame | null>(null);
