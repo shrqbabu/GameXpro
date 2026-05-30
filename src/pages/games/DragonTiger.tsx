@@ -182,11 +182,11 @@ const DragonTigerPage: React.FC = () => {
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div>
-            //ExitButton
+            {/* ExitButton */}
             <button onClick={() => navigate("/dashboard")}
              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold">Exit
             </button>
-            //EndExitButton
+            {/* ExitButton */}
             <p className="text-gray-500 text-xs hidden sm:block">Higher card wins • Tie pays 8×</p>
           </div>
           <div className="flex items-center gap-2">
