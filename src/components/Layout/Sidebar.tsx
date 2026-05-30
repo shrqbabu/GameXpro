@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard,
   Wallet,
+  Swords,
+  Split,
   PlusCircle,
   ArrowUpCircle,
   Clock,
@@ -11,6 +13,7 @@ import {
   Users,
   User,
   Bell,
+  PlayingCards
   Shield,
   Dice5,
   Spade,
@@ -43,9 +46,9 @@ const gameItems = [
   { path: '/games/color-prediction', icon: Palette, label: 'Color Prediction', color: 'text-red-400' },
   { path: '/matchmaking', icon: Spade, label: 'Card Battle', color: 'text-blue-400' },
   { path: '/games/dice', icon: Dice5, label: 'Dice Game', color: 'text-green-400' },
-  { path: '/games/poker', icon: Dice5, label: 'Poker', color: 'text-green-400' },
-  { path: '/games/dragon-tiger', icon: Shield, label: 'Dragon Tiger', color: 'text-green-400' },
-  { path: '/games/andar-bahar', icon: Dice5, label: 'Andar Bahar', color: 'text-green-400' },
+  { path: '/games/poker', icon: PlayingCards, label: 'Poker', color: 'text-green-400' },
+  { path: '/games/dragon-tiger', icon: Swords, label: 'Dragon Tiger', color: 'text-green-400' },
+  { path: '/games/andar-bahar', icon: Split, label: 'Andar Bahar', color: 'text-green-400' },
 ];
 
 export const Sidebar: React.FC = () => {
