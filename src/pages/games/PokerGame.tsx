@@ -9,22 +9,20 @@ import {
 } from '../../firebase/games';
 import CardDisplay from '../../components/games/CardDisplay';
 import { formatCurrency } from '../../utils/helpers';
-import {
-  ArrowLeft, Loader2, LogOut, Minus, Plus,
-} from 'lucide-react';
+import { Loader2, LogOut } from 'lucide-react';
 
-// ── Vertical Poker Table Seat Positions (6 max) ──────────────
-// 0 = bottom (You), going clockwise
+// ── Seat positions for square table (6 max, % based) ─────────
+// Adjusted for square shape with 20% border-radius
 const SEAT_POS: Record<number, string> = {
-  0: 'bottom-[2%] left-1/2 -translate-x-1/2',        // You (bottom center)
-  1: 'top-[42%] right-[1%] -translate-y-1/2',        // right middle
-  2: 'top-[14%] right-[8%]',                          // top right
-  3: 'top-[2%] left-1/2 -translate-x-1/2',           // top center
-  4: 'top-[14%] left-[8%]',                           // top left
-  5: 'top-[42%] left-[1%] -translate-y-1/2',          // left middle
+  0: 'bottom-[3%] left-1/2 -translate-x-1/2',         // You (bottom center)
+  1: 'top-[42%] right-[2%] -translate-y-1/2',         // right middle
+  2: 'top-[12%] right-[6%]',                           // top right
+  3: 'top-[3%] left-1/2 -translate-x-1/2',            // top center
+  4: 'top-[12%] left-[6%]',                            // top left
+  5: 'top-[42%] left-[2%] -translate-y-1/2',           // left middle
 };
 
-// ── Player Seat Component ────────────────────────────────────
+// ── Player Seat Component ─────────────────────────────────────
 const PlayerSeat: React.FC<{
   player: PokerPlayer;
   isMe: boolean;
@@ -35,54 +33,64 @@ const PlayerSeat: React.FC<{
   const folded = player.status === 'folded';
 
   return (
-    <div className={`flex flex-col items-center ${folded ? 'opacity-40' : ''}`}>
-      {/* Avatar with golden ring */}
+    <div className={`flex flex-col items-center gap-0.5 ${folded ? 'opacity-40' : ''}`}>
+
+      {/* Hole cards above avatar */}
+      {isPlaying && player.holeCards.length > 0 && (
+        <div className="flex gap-0.5 mb-[-6px] z-10 relative">
+          {(isMe || (phase === 'showdown' && !folded))
+            ? player.holeCards.map((c, i) => <CardDisplay key={i} card={c} size="xs" animate />)
+            : player.holeCards.map((_, i) => <CardDisplay key={i} faceDown size="xs" />)}
+        </div>
+      )}
+
+      {/* Avatar */}
       <div className="relative">
-        <div className={`w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center
-          text-base md:text-xl font-black border-[3px] transition-all
+        <div className={`
+          rounded-full flex items-center justify-center font-black border-[3px] transition-all
+          ${isMe ? 'w-14 h-14 md:w-16 md:h-16' : 'w-11 h-11 md:w-13 md:h-13'}
           ${isActive && isPlaying
-            ? 'border-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.7)]'
+            ? 'border-yellow-400 shadow-[0_0_0_2px_#e8b84b,0_0_16px_rgba(232,184,75,0.6)]'
             : isMe ? 'border-purple-500' : 'border-gray-600'}
-          ${isMe ? 'bg-gradient-to-br from-purple-500 to-blue-600 text-white'
-            : 'bg-gradient-to-br from-gray-700 to-gray-800 text-white'}`}>
+          ${isMe
+            ? 'bg-gradient-to-br from-purple-600 to-blue-600 text-white text-xl'
+            : 'bg-gradient-to-br from-gray-700 to-gray-800 text-white text-base'}`}>
           {player.name.charAt(0).toUpperCase()}
         </div>
 
         {/* Dealer button */}
         {player.isDealer && (
           <span className="absolute -bottom-1 -right-1 bg-white text-gray-900
-            text-[9px] md:text-xs font-black w-4 h-4 md:w-5 md:h-5 rounded-full
-            flex items-center justify-center shadow-md border border-gray-300">D</span>
-        )}
-
-        {/* Hole Cards (overlapping avatar top) */}
-        {isPlaying && player.holeCards.length > 0 && (
-          <div className="absolute -top-5 md:-top-7 left-1/2 -translate-x-1/2 flex gap-0.5">
-            {(isMe || (phase === 'showdown' && !folded))
-              ? player.holeCards.map((c, i) => <CardDisplay key={i} card={c} size="xs" animate />)
-              : player.holeCards.map((_, i) => <CardDisplay key={i} faceDown size="xs" />)}
-          </div>
+            text-[8px] font-black w-4 h-4 rounded-full flex items-center justify-center
+            shadow-md border border-gray-300 z-10">D</span>
         )}
       </div>
 
       {/* Name + Chips plate */}
-      <div className={`mt-1 px-2 py-0.5 rounded-lg border text-center min-w-[64px] md:min-w-[80px]
+      <div className={`
+        px-2 py-0.5 border text-center
+        ${isMe ? 'min-w-[80px] md:min-w-[88px]' : 'min-w-[64px] md:min-w-[72px]'}
         ${isActive && isPlaying
-          ? 'bg-yellow-950/80 border-yellow-500/50'
-          : 'bg-gray-900/90 border-gray-700/60'}`}>
-        <p className="text-white text-[10px] md:text-xs font-bold truncate leading-tight">
+          ? 'bg-yellow-950/90 border-yellow-500/50'
+          : isMe
+            ? 'bg-[#140a28]/95 border-purple-500/40'
+            : 'bg-gray-900/92 border-white/10'}
+      `} style={{ borderRadius: '3px' }}>
+        <p className={`text-[10px] md:text-[11px] font-semibold truncate leading-tight
+          ${isMe ? 'text-purple-300' : 'text-white'}`}>
           {isMe ? 'You' : player.name}
         </p>
-        <p className="text-yellow-400 text-[10px] md:text-xs font-bold leading-tight">
+        <p className="text-yellow-400 text-[10px] md:text-[11px] font-semibold leading-tight flex items-center justify-center gap-0.5">
+          <span className="w-2 h-2 bg-yellow-400 rounded-full inline-block" />
           {formatCurrency(player.chips)}
         </p>
       </div>
 
-      {/* Status / Bet chip */}
-      <div className="h-4 mt-0.5 flex items-center justify-center">
+      {/* Bet / status badge */}
+      <div className="h-4 flex items-center justify-center">
         {player.bet > 0 && (
-          <span className="bg-black/60 text-yellow-400 text-[9px] md:text-[10px]
-            font-bold px-1.5 py-0.5 rounded-full border border-yellow-500/30">
+          <span className="bg-black/70 text-yellow-400 text-[9px] font-bold
+            px-1.5 py-0.5 border border-yellow-500/30" style={{ borderRadius: '3px' }}>
             ₹{player.bet}
           </span>
         )}
@@ -91,7 +99,7 @@ const PlayerSeat: React.FC<{
           <span className="text-yellow-400 text-[9px] font-black animate-pulse">ALL IN</span>
         )}
         {phase === 'showdown' && player.handRank && !folded && (
-          <span className="text-emerald-400 text-[8px] md:text-[9px] font-bold truncate max-w-[70px]">
+          <span className="text-emerald-400 text-[8px] font-bold truncate max-w-[72px]">
             {player.handRank}
           </span>
         )}
@@ -100,7 +108,7 @@ const PlayerSeat: React.FC<{
   );
 };
 
-// ── Main Page ────────────────────────────────────────────────
+// ── Main Page ─────────────────────────────────────────────────
 const PokerGamePage: React.FC = () => {
   const { tableId } = useParams<{ tableId: string }>();
   const { user } = useAuth();
@@ -125,7 +133,6 @@ const PokerGamePage: React.FC = () => {
     });
   }, [tableId]);
 
-  // Auto-start when 2nd player joins
   useEffect(() => {
     if (!table || !tableId) return;
     const n = table.players.length;
@@ -141,7 +148,6 @@ const PokerGamePage: React.FC = () => {
     prevCount.current = n;
   }, [table?.players.length, table?.status]);
 
-  // Auto next hand after showdown
   useEffect(() => {
     if (!table || !tableId) return;
     if (table.status === 'waiting' && table.phase === 'showdown' && table.players.length >= 2) {
@@ -152,7 +158,6 @@ const PokerGamePage: React.FC = () => {
     }
   }, [table?.phase, table?.status, table?.players.length]);
 
-  // Auto leave if broke
   useEffect(() => {
     if (!table || !user) return;
     const me = table.players.find(p => p.uid === user.uid);
@@ -195,10 +200,7 @@ const PokerGamePage: React.FC = () => {
   };
 
   const adjustRaise = (delta: number) => {
-    setRaiseAmount(prev => {
-      const next = prev + delta;
-      return Math.max(minRaise, Math.min(next, maxRaise));
-    });
+    setRaiseAmount(prev => Math.max(minRaise, Math.min(prev + delta, maxRaise)));
   };
 
   if (loading) return (
@@ -211,9 +213,8 @@ const PokerGamePage: React.FC = () => {
     <div className="h-screen bg-black flex items-center justify-center text-white">
       <div className="text-center">
         <p className="mb-4">Table not found</p>
-        <button onClick={() => navigate('/games/poker')}
-          className="text-yellow-400 flex items-center gap-2 mx-auto">
-          <ArrowLeft className="w-4 h-4" /> Back
+        <button onClick={() => navigate('/games/poker')} className="text-yellow-400 text-sm">
+          ← Back
         </button>
       </div>
     </div>
@@ -223,41 +224,55 @@ const PokerGamePage: React.FC = () => {
     && myPlayer?.status === 'active';
 
   return (
-    <div className="fixed inset-0 flex flex-col bg-[#0a0e0a] text-white overflow-hidden select-none">
+    <div className="fixed inset-0 flex flex-col bg-[#050f08] text-white overflow-hidden select-none">
 
-      {/* ══ TOP BAR ══════════════════════════════════════════ */}
-      <div className="shrink-0 flex items-center justify-between px-3 py-2.5 z-40">
-        <button onClick={() => setShowLeave(true)}
-          className="w-10 h-10 rounded-full border-2 border-gray-700 bg-gray-900/80
-            flex items-center justify-center text-gray-300 active:scale-90 transition-transform">
-          <ArrowLeft className="w-5 h-5" />
-        </button>
+      {/* ══ HEADER ══════════════════════════════════════════ */}
+      <div className="shrink-0 flex items-center justify-between px-3 py-2.5 z-40
+        bg-[rgba(5,15,10,0.97)] border-b border-yellow-700/15 relative">
 
-        {/* Center info pill */}
-        <div className="flex items-center gap-2 bg-gray-900/80 border-2 border-yellow-700/40
-          rounded-full px-4 py-1.5">
-          <span className="text-yellow-500 text-[10px] font-bold uppercase tracking-wider">
-            POT
+        {/* Jackpot pill */}
+        <div className="flex flex-col items-start bg-yellow-400/8 border border-yellow-400/25 px-3 py-1.5"
+          style={{ borderRadius: '4px' }}>
+          <span className="text-[9px] font-semibold tracking-widest uppercase text-yellow-600">
+            Jackpot
           </span>
-          <span className="text-yellow-400 text-sm font-black">
-            {formatCurrency(pot)}
+          <span className="font-bold text-yellow-400 text-[15px] leading-tight"
+            style={{ fontFamily: 'Georgia, serif' }}>
+            <span className="inline-block w-2.5 h-2.5 bg-yellow-400 rounded-full mr-1 align-middle" />
+            {formatCurrency(table.jackpot || 25000)}
           </span>
         </div>
 
-        <button onClick={() => setShowLeave(true)}
-          className="flex items-center gap-1.5 border-2 border-red-700/50 bg-red-950/40
-            rounded-xl px-3 py-2 text-red-400 text-xs font-bold active:scale-90 transition-transform">
+        {/* Center: table name + phase */}
+        <div className="absolute left-1/2 -translate-x-1/2 flex flex-col items-center">
+          <span className="text-[10px] tracking-[2px] uppercase text-gray-400 font-medium">
+            Royal Table
+          </span>
+          <span className="text-[11px] font-semibold text-yellow-400 tracking-wide capitalize">
+            {phase === 'waiting' ? 'Waiting' : phase}
+          </span>
+        </div>
+
+        {/* EXIT button */}
+        <button
+          onClick={() => setShowLeave(true)}
+          className="flex items-center gap-1.5 px-3.5 py-2 text-red-400 text-xs font-semibold
+            tracking-wider uppercase border border-red-500/35 bg-red-900/15 active:scale-95
+            transition-transform"
+          style={{ borderRadius: '4px' }}>
           EXIT <LogOut className="w-3.5 h-3.5" />
         </button>
       </div>
 
-      {/* ══ TABLE AREA (Vertical Oval) ══════════════════════ */}
-      <div className="flex-1 relative flex items-center justify-center px-2 overflow-hidden">
+      {/* ══ TABLE AREA ══════════════════════════════════════ */}
+      <div className="flex-1 relative flex items-center justify-center px-3 overflow-hidden"
+        style={{ background: 'radial-gradient(ellipse at center, #0a1a10 0%, #050f08 100%)' }}>
 
         {/* Waiting overlay */}
         {phase === 'waiting' && numPlayers < 2 && (
           <div className="absolute inset-0 flex items-center justify-center z-30">
-            <div className="text-center bg-gray-900/95 border border-gray-700 rounded-2xl p-6 mx-4">
+            <div className="text-center bg-gray-900/95 border border-gray-700 p-6 mx-4"
+              style={{ borderRadius: '6px' }}>
               <Loader2 className="w-8 h-8 text-yellow-400 animate-spin mx-auto mb-3" />
               <p className="text-white font-bold text-sm">Waiting for players...</p>
               <p className="text-gray-400 text-xs mt-1">{numPlayers}/2 joined</p>
@@ -268,55 +283,62 @@ const PokerGamePage: React.FC = () => {
           </div>
         )}
 
-        {/* Vertical Oval Table */}
-        <div className="relative w-full max-w-[440px] mx-auto"
-          style={{ height: 'min(75vh, 620px)', aspectRatio: '0.62' }}>
+        {/* ── Square Table (20% border-radius) ── */}
+        <div className="relative w-full max-w-[400px] mx-auto"
+          style={{ height: 'min(72vh, 520px)', aspectRatio: '0.72' }}>
 
-          {/* Outer wooden rim */}
-          <div className="absolute inset-0 rounded-[50%]
-            bg-gradient-to-b from-[#8B5A2B] via-[#6B4423] to-[#3D2817]
-            shadow-[0_10px_40px_rgba(0,0,0,0.8)]" />
+          {/* Wooden rim */}
+          <div className="absolute inset-0 shadow-[0_14px_44px_rgba(0,0,0,0.8)]"
+            style={{
+              borderRadius: '20%',
+              background: 'linear-gradient(145deg, #8a4f18 0%, #5c3410 40%, #3d2008 100%)',
+              boxShadow: '0 0 0 3px #9B6A2B, inset 0 0 20px rgba(0,0,0,0.5), 0 14px 44px rgba(0,0,0,0.8)',
+            }} />
 
-          {/* Inner felt */}
-          <div className="absolute inset-[12px] md:inset-[16px] rounded-[50%]
-            bg-gradient-to-b from-[#1a7a4a] via-[#0f6638] to-[#0a4528]
-            shadow-[inset_0_0_60px_rgba(0,0,0,0.6)]">
+          {/* Felt surface */}
+          <div className="absolute inset-[13px] overflow-hidden"
+            style={{
+              borderRadius: '20%',
+              background: 'radial-gradient(ellipse at 50% 38%, #1a7a4a 0%, #0f6035 55%, #092d1a 100%)',
+              boxShadow: 'inset 0 0 50px rgba(0,0,0,0.5)',
+            }}>
 
             {/* Spade watermark */}
-            <div className="absolute inset-0 flex items-center justify-center opacity-[0.07]">
-              <span className="text-white text-[140px] md:text-[200px] leading-none">♠</span>
+            <div className="absolute inset-0 flex items-center justify-center
+              text-white/[0.04] text-[110px] pointer-events-none select-none">
+              ♠
             </div>
 
-            {/* Center: Community cards + Pot */}
+            {/* Center: Pot + Community Cards */}
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
               flex flex-col items-center gap-2 w-full px-4">
 
-              {/* POT */}
               {pot > 0 && (
-                <div className="bg-black/50 border border-yellow-500/30 rounded-full
-                  px-4 py-1 mb-1">
-                  <span className="text-yellow-500 text-[9px] font-bold uppercase tracking-wider">Pot </span>
-                  <span className="text-yellow-400 text-xs md:text-sm font-black">
+                <div className="flex items-center gap-1.5 bg-black/55 border border-yellow-400/30
+                  px-4 py-1" style={{ borderRadius: '3px' }}>
+                  <span className="text-[9px] font-semibold tracking-[2px] uppercase text-yellow-600">
+                    POT
+                  </span>
+                  <span className="font-bold text-yellow-400 text-sm"
+                    style={{ fontFamily: 'Georgia, serif' }}>
                     {formatCurrency(pot)}
                   </span>
                 </div>
               )}
 
-              {/* Community Cards */}
               {phase !== 'waiting' && (
                 <div className="flex gap-1 md:gap-1.5 justify-center">
                   {[...Array(5)].map((_, i) => (
                     table.communityCards[i]
                       ? <CardDisplay key={i} card={table.communityCards[i]} size="sm" animate />
-                      : <div key={i} className="w-8 h-11 md:w-10 md:h-14 rounded-lg
-                          border border-white/10 bg-black/20" />
+                      : <div key={i} className="w-7 h-10 md:w-9 md:h-12 border border-white/10
+                          bg-black/20" style={{ borderRadius: '3px' }} />
                   ))}
                 </div>
               )}
 
-              {/* Current bet */}
               {currentBet > 0 && phase !== 'waiting' && (
-                <div className="bg-black/40 rounded-lg px-2 py-0.5 mt-1">
+                <div className="bg-black/40 px-2 py-0.5" style={{ borderRadius: '3px' }}>
                   <span className="text-white/50 text-[9px]">
                     Bet: <span className="text-white font-bold">{formatCurrency(currentBet)}</span>
                   </span>
@@ -348,21 +370,22 @@ const PokerGamePage: React.FC = () => {
       {error && (
         <div className="absolute bottom-44 left-1/2 -translate-x-1/2 z-50
           bg-red-900/95 border border-red-500/50 text-red-300 text-xs font-medium
-          px-4 py-2 rounded-xl whitespace-nowrap">
+          px-4 py-2 whitespace-nowrap" style={{ borderRadius: '4px' }}>
           {error}
         </div>
       )}
 
-      {/* ══ BOTTOM ACTION AREA ═══════════════════════════════ */}
-      <div className="shrink-0 bg-gradient-to-t from-black to-transparent pt-2 pb-3 px-2 z-40">
+      {/* ══ BOTTOM ACTION AREA ════════════════════════════ */}
+      <div className="shrink-0 bg-[rgba(5,12,8,0.98)] border-t border-yellow-700/12
+        pt-3 pb-4 px-3 z-40">
 
         {/* WAITING */}
         {phase === 'waiting' && (
-          <div className="text-center py-4">
+          <div className="text-center py-3">
             {canStart ? (
               <button onClick={() => tableId && startPokerHand(tableId)}
-                className="bg-emerald-600 text-white font-black px-8 py-3 rounded-2xl
-                  active:scale-95 transition-transform">
+                className="bg-emerald-600 text-white font-black px-8 py-3 active:scale-95
+                  transition-transform" style={{ borderRadius: '4px' }}>
                 Start Game
               </button>
             ) : (
@@ -371,92 +394,102 @@ const PokerGamePage: React.FC = () => {
           </div>
         )}
 
-        {/* MY TURN — Action buttons */}
+        {/* MY TURN */}
         {showActions && (
           <div className="space-y-2 max-w-md mx-auto">
-            {/* Action Buttons Row */}
+
+            {/* YOUR TURN pulse */}
+            <p className="text-center text-emerald-400 font-semibold text-[11px] tracking-[2px]
+              uppercase animate-pulse">
+              YOUR TURN
+            </p>
+
+            {/* Action Buttons */}
             <div className="grid grid-cols-4 gap-1.5">
-              {/* FOLD */}
               <button onClick={() => handleAction('fold')} disabled={actionLoading}
-                className="bg-gradient-to-b from-red-700 to-red-900 border-2 border-red-600/50
-                  rounded-2xl py-3 text-white font-black text-sm active:scale-95
-                  transition-transform disabled:opacity-40 shadow-lg">
+                className="flex flex-col items-center py-2.5 text-white font-black text-[13px]
+                  border-[1.5px] border-red-500/35 active:scale-95 transition-transform
+                  disabled:opacity-40"
+                style={{ borderRadius: '4px', background: 'linear-gradient(160deg,#7f1d1d,#991b1b)' }}>
                 FOLD
               </button>
 
-              {/* CHECK / CALL */}
               {(myPlayer?.bet || 0) >= currentBet ? (
                 <button onClick={() => handleAction('check')} disabled={actionLoading}
-                  className="bg-gradient-to-b from-yellow-600 to-yellow-800 border-2 border-yellow-500/50
-                    rounded-2xl py-3 text-white font-black text-sm active:scale-95
-                    transition-transform disabled:opacity-40 shadow-lg">
+                  className="flex flex-col items-center py-2.5 text-white font-black text-[13px]
+                    border-[1.5px] border-yellow-500/35 active:scale-95 transition-transform
+                    disabled:opacity-40"
+                  style={{ borderRadius: '4px', background: 'linear-gradient(160deg,#78350f,#92400e)' }}>
                   CHECK
                 </button>
               ) : (
                 <button onClick={() => handleAction('call')} disabled={actionLoading || callAmount === 0}
-                  className="bg-gradient-to-b from-green-600 to-green-800 border-2 border-green-500/50
-                    rounded-2xl py-2 text-white font-black active:scale-95
-                    transition-transform disabled:opacity-40 shadow-lg flex flex-col leading-tight">
-                  <span className="text-sm">CALL</span>
-                  <span className="text-[10px] opacity-90">{formatCurrency(callAmount)}</span>
+                  className="flex flex-col items-center py-2 text-white font-black
+                    border-[1.5px] border-green-500/35 active:scale-95 transition-transform
+                    disabled:opacity-40"
+                  style={{ borderRadius: '4px', background: 'linear-gradient(160deg,#14532d,#166534)' }}>
+                  <span className="text-[13px]">CALL</span>
+                  <span className="text-[10px] opacity-80">{formatCurrency(callAmount)}</span>
                 </button>
               )}
 
-              {/* RAISE */}
               <button onClick={() => handleAction('raise')}
                 disabled={actionLoading || (myPlayer?.chips || 0) <= callAmount || raiseAmount < minRaise}
-                className="bg-gradient-to-b from-purple-600 to-purple-900 border-2 border-purple-500/50
-                  rounded-2xl py-2 text-white font-black active:scale-95
-                  transition-transform disabled:opacity-40 shadow-lg flex flex-col leading-tight">
-                <span className="text-sm">RAISE</span>
-                <span className="text-[10px] opacity-90">{formatCurrency(Math.min(raiseAmount, maxRaise))}</span>
+                className="flex flex-col items-center py-2 text-white font-black
+                  border-[1.5px] border-purple-500/35 active:scale-95 transition-transform
+                  disabled:opacity-40"
+                style={{ borderRadius: '4px', background: 'linear-gradient(160deg,#3b0764,#4c1d95)' }}>
+                <span className="text-[13px]">RAISE</span>
+                <span className="text-[10px] opacity-80">
+                  {formatCurrency(Math.min(raiseAmount, maxRaise))}
+                </span>
               </button>
 
-              {/* ALL IN */}
               <button onClick={() => handleAction('allin')}
                 disabled={actionLoading || (myPlayer?.chips || 0) === 0}
-                className="bg-gradient-to-b from-orange-600 to-red-700 border-2 border-orange-500/50
-                  rounded-2xl py-2 text-white font-black active:scale-95
-                  transition-transform disabled:opacity-40 shadow-lg flex flex-col leading-tight">
-                <span className="text-sm">ALL IN</span>
-                <span className="text-[10px] opacity-90">{formatCurrency(myPlayer?.chips || 0)}</span>
+                className="flex flex-col items-center py-2 text-white font-black
+                  border-[1.5px] border-orange-500/35 active:scale-95 transition-transform
+                  disabled:opacity-40"
+                style={{ borderRadius: '4px', background: 'linear-gradient(160deg,#7c2d12,#9a3412)' }}>
+                <span className="text-[13px]">ALL IN</span>
+                <span className="text-[10px] opacity-80">{formatCurrency(myPlayer?.chips || 0)}</span>
               </button>
             </div>
 
-            {/* Raise Controls (MIN / - / amount / + / MAX) */}
+            {/* Raise Controls */}
             {(myPlayer?.chips || 0) > callAmount && (
               <div className="flex items-center gap-1.5">
                 <button onClick={() => setRaiseAmount(minRaise)}
-                  className="bg-gray-800 border border-yellow-700/40 rounded-xl px-3 py-2.5
-                    text-yellow-500 text-xs font-bold active:scale-95">
+                  className="bg-white/7 border border-white/12 px-3 py-2 text-yellow-400
+                    text-[11px] font-bold active:scale-95"
+                  style={{ borderRadius: '4px' }}>
                   MIN
                 </button>
                 <button onClick={() => adjustRaise(-(table.bigBlind || 10))}
-                  className="bg-gray-800 border border-gray-700 rounded-xl w-10 h-10
-                    flex items-center justify-center text-white active:scale-95">
-                  <Minus className="w-4 h-4" />
+                  className="w-9 h-9 bg-white/8 border border-white/12 flex items-center
+                    justify-center text-white text-lg active:scale-95"
+                  style={{ borderRadius: '4px' }}>
+                  −
                 </button>
-                <div className="flex-1 bg-gray-900 border border-gray-700 rounded-xl py-2.5 text-center">
-                  <span className="text-white font-black text-base">
-                    {formatCurrency(Math.min(raiseAmount, maxRaise))}
-                  </span>
+                <div className="flex-1 bg-white/6 border border-white/10 py-2.5 text-center
+                  text-white font-bold text-base" style={{ borderRadius: '4px',
+                  fontFamily: 'Georgia, serif' }}>
+                  {formatCurrency(Math.min(raiseAmount, maxRaise))}
                 </div>
                 <button onClick={() => adjustRaise(table.bigBlind || 10)}
-                  className="bg-gray-800 border border-gray-700 rounded-xl w-10 h-10
-                    flex items-center justify-center text-white active:scale-95">
-                  <Plus className="w-4 h-4" />
+                  className="w-9 h-9 bg-white/8 border border-white/12 flex items-center
+                    justify-center text-white text-lg active:scale-95"
+                  style={{ borderRadius: '4px' }}>
+                  +
                 </button>
                 <button onClick={() => setRaiseAmount(maxRaise)}
-                  className="bg-gray-800 border border-yellow-700/40 rounded-xl px-3 py-2.5
-                    text-yellow-500 text-xs font-bold active:scale-95">
+                  className="bg-white/7 border border-white/12 px-3 py-2 text-yellow-400
+                    text-[11px] font-bold active:scale-95"
+                  style={{ borderRadius: '4px' }}>
                   MAX
                 </button>
               </div>
             )}
-
-            <p className="text-center text-emerald-400 font-bold text-sm animate-pulse">
-              YOUR TURN
-            </p>
           </div>
         )}
 
@@ -485,7 +518,8 @@ const PokerGamePage: React.FC = () => {
         {phase === 'showdown' && (
           <div className="text-center py-3 space-y-2">
             {myPlayer && myPlayer.chips <= 0 ? (
-              <div className="bg-red-900/40 border border-red-500/30 rounded-xl px-4 py-3 inline-block">
+              <div className="bg-red-900/40 border border-red-500/30 px-4 py-3 inline-block"
+                style={{ borderRadius: '4px' }}>
                 <p className="text-red-400 font-bold text-sm">💸 You're out of chips!</p>
                 <p className="text-gray-400 text-xs">Returning to lobby...</p>
               </div>
@@ -501,22 +535,32 @@ const PokerGamePage: React.FC = () => {
 
       {/* ══ LEAVE MODAL ══ */}
       {showLeave && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] px-4">
-          <div className="bg-gray-900 border border-gray-700 rounded-3xl p-6 w-full max-w-sm text-center">
-            <LogOut className="w-12 h-12 text-red-400 mx-auto mb-3" />
-            <h3 className="text-white font-black text-lg mb-1">Leave Table?</h3>
-            <p className="text-gray-400 text-sm mb-3">Remaining chips return to your wallet.</p>
+        <div className="fixed inset-0 bg-black/82 backdrop-blur-sm flex items-center
+          justify-center z-[100] px-4">
+          <div className="bg-[#0d1a12] border border-yellow-400/20 p-6 w-full max-w-[310px]
+            text-center" style={{ borderRadius: '6px' }}>
+            <LogOut className="w-10 h-10 text-red-400 mx-auto mb-3" />
+            <h3 className="text-white font-black text-lg mb-1"
+              style={{ fontFamily: 'Georgia, serif' }}>Leave Table?</h3>
+            <p className="text-gray-400/80 text-sm mb-3">
+              Remaining chips return to your wallet.
+            </p>
             {(myPlayer?.chips || 0) > 0 && (
-              <p className="text-emerald-400 font-black text-2xl mb-5">+{formatCurrency(myPlayer!.chips)}</p>
+              <p className="text-emerald-400 font-black text-2xl mb-5"
+                style={{ fontFamily: 'Georgia, serif' }}>
+                +{formatCurrency(myPlayer!.chips)}
+              </p>
             )}
             <div className="flex gap-3">
               <button onClick={() => setShowLeave(false)}
-                className="flex-1 bg-gray-800 border border-gray-700 text-white font-bold py-3 rounded-2xl text-sm">
+                className="flex-1 bg-white/7 border border-white/12 text-white font-bold
+                  py-3 text-sm" style={{ borderRadius: '4px' }}>
                 Stay
               </button>
               <button onClick={handleLeave} disabled={leaving}
-                className="flex-1 bg-red-600 text-white font-bold py-3 rounded-2xl text-sm
-                  flex items-center justify-center gap-2 disabled:opacity-50">
+                className="flex-1 bg-red-600 text-white font-bold py-3 text-sm
+                  flex items-center justify-center gap-2 disabled:opacity-50"
+                style={{ borderRadius: '4px' }}>
                 {leaving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Leave'}
               </button>
             </div>
