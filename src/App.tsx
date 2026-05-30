@@ -5,13 +5,12 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute, AdminRoute, PublicRoute } from './components/ProtectedRoute';
 import { MainLayout } from './components/Layout/MainLayout';
+import GameHeader from './components/games/GameHeader';
 
 import DragonTigerPage from './pages/games/DragonTiger';
 import AndarBaharPage from './pages/games/AndarBahar';
 import PokerGamePage from './pages/games/PokerGame';
 import PokerLobbyPage from './pages/games/PokerLobby';
-
-
 
 // Pages
 import { Login } from './pages/Login';
@@ -52,7 +51,7 @@ export default function App() {
               <Route path="/signup" element={<Signup />} />
             </Route>
 
-            {/* Protected routes */}
+            {/* Protected routes — WITH MainLayout (Header + Sidebar) */}
             <Route element={<ProtectedRoute />}>
               <Route element={<MainLayout />}>
                 <Route path="/dashboard" element={<Dashboard />} />
@@ -66,19 +65,20 @@ export default function App() {
                 <Route path="/notifications" element={<Notifications />} />
                 <Route path="/matchmaking" element={<Matchmaking />} />
                 <Route path="/game-room/:roomId" element={<GameRoom />} />
-                <Route path="/games/color-prediction" element={<ColorPrediction />} />
-                <Route path="/games/dice" element={<DiceGame />} />
-                <Route path="/games/dragon-tiger" element={<DragonTigerPage />} />
-                
-                <Route path="/games/andar-bahar" element={<AndarBaharPage />} />
                 <Route path="/games/poker" element={<PokerLobbyPage />} />
-                <Route path="/games/poker/:tableId" element={<PokerGamePage />} />
-                
+
                 {/* Admin routes */}
                 <Route element={<AdminRoute />}>
                   <Route path="/admin" element={<AdminDashboard />} />
                 </Route>
               </Route>
+
+              {/* Game pages — WITHOUT MainLayout (no Header/Sidebar) */}
+              <Route path="/games/color-prediction" element={<ColorPrediction />} />
+              <Route path="/games/dice" element={<DiceGame />} />
+              <Route path="/games/dragon-tiger" element={<DragonTigerPage />} />
+              <Route path="/games/andar-bahar" element={<AndarBaharPage />} />
+              <Route path="/games/poker/:tableId" element={<PokerGamePage />} />
             </Route>
 
             {/* Default redirects */}
