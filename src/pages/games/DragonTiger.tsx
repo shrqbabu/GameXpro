@@ -10,6 +10,7 @@ import {
   DTBet,
 } from '../../firebase/games';
 import CardDisplay from '../../components/games/CardDisplay';
+import { useNavigate } from "react-router-dom";
 import GameTimer from '../../components/games/GameTimer';
 import { formatCurrency, calculateUsableBalance } from '../../utils/helpers';
 import {
@@ -19,6 +20,7 @@ import {
 
 const BET_CHIPS = [10, 50, 100, 500, 1000];
 const NEXT_ROUND_DELAY = 8000;
+const navigate = useNavigate();
 
 interface HistEntry { winner: 'dragon' | 'tiger' | 'tie'; roundNumber: number; }
 
@@ -180,7 +182,11 @@ const DragonTigerPage: React.FC = () => {
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h1 className="text-lg md:text-xl font-black">🐉 Dragon Tiger</h1>
+            //ExitButton
+            <button onClick={() => navigate("/dashboard")}
+             className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold">Exit
+            </button>
+            //EndExitButton
             <p className="text-gray-500 text-xs hidden sm:block">Higher card wins • Tie pays 8×</p>
           </div>
           <div className="flex items-center gap-2">
