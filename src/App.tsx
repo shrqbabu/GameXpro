@@ -77,7 +77,7 @@ export default function App() {
               </Route>
 
               {/* Game pages — WITHOUT MainLayout (no Header/Sidebar) */}
-              <Route path="/games/dragon-tiger" element={<DragonTigerPage />} />
+              <Route path="/game-room/:roomId" element={<GameRoom />} />
               <Route path="/games/poker/:tableId" element={<PokerGamePage />} />
             </Route>
 
