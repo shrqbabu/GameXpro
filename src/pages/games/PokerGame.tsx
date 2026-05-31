@@ -681,10 +681,10 @@ const PokerGamePage: React.FC = () => {
               We pre-calculate these for the 6 standard positions.
             */}
               // Map wrapper seat positions → felt-relative positions
-              emptySeats.map(seatIdx => {
+             {emptySeats.map(seatIdx => {
               { const FELT_EMPTY_POSITIONS: Record<
                 number, React.CSSProperties
-              > = {
+            > = {
                 0: {
                   bottom: '8%',
                   left: '50%',
