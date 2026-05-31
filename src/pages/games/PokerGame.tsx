@@ -9,7 +9,7 @@ import {
 } from '../../firebase/games';
 import CardDisplay from '../../components/games/CardDisplay';
 import { formatCurrency } from '../../utils/helpers';
-import { Loader2, LogOut } from 'lucide-react';
+import { Loader2, LogOut } from 'lucifde-react';
 
 // ─── Seat positions as % of the WRAPPER (not the felt) ─────────────────────
 // These match exactly where players sit — empty seats use identical positions
@@ -21,6 +21,15 @@ const SEAT_POSITIONS: Record<number, React.CSSProperties> = {
   4: { top: '10%',      left: '18%'  },                                    // top left
   5: { bottom: '24%',     left: '2%', },    // left middle
 };
+
+      const FELT_EMPTY_POSITIONS: Record< number, React.CSSProperties> = {
+        0: { bottom: '8%', left: '50%', transform: 'translateX(-50%)',},
+        1: { bottom: '24%', right: '4%', },
+        2: { top: '12%', right: '18%', },
+        3: { top: '4%', left: '50%',},
+        4: { top: '14%', left: '14%', },
+        5: { bottom: '24%', left: '4%', },
+      };
 
 // ─── Animated Card Component ────────────────────────────────────────────────
 const AnimatedCard: React.FC<{
@@ -666,30 +675,10 @@ const PokerGamePage: React.FC = () => {
             </div>
 
             {/* ── EMPTY SEATS inside felt ──────────────────────────── */}
-            {/*
-              Key insight: empty seat positions should match SEAT_POSITIONS
-              but expressed relative to the FELT (not the wrapper).
-              We translate wrapper-% → felt-% using the inset ratios.
 
-              Felt top=15%, bottom=15% → felt height = 70% of wrapper
-              Felt left=8%, right=8%   → felt width  = 84% of wrapper
-
-              For a seat at wrapper position (x%, y%), its felt position:
-                feltX = (x - 8)  / 84 * 100
-                feltY = (y - 15) / 70 * 100
-
-              We pre-calculate these for the 6 standard positions.
-            */}
-              // Map wrapper seat positions → felt-relative positions
+            {/* We pre-calculate these for the 6 standard positions.*/}
+            
              {emptySeats.map(seatIdx => {
-               const FELT_EMPTY_POSITIONS: Record< number, React.CSSProperties> = {
-                0: { bottom: '8%', left: '50%', transform: 'translateX(-50%)',},
-                1: { bottom: '24%', right: '4%', },
-                2: { top: '12%', right: '18%', },
-                3: { top: '4%', left: '50%',},
-                4: { top: '14%', left: '14%', },
-                5: { bottom: '24%', left: '4%', },
-              };
               return (
                 <div
                   key={`empty-${seatIdx}`}
@@ -817,7 +806,7 @@ const PokerGamePage: React.FC = () => {
                       Raise Amount
                     </span>
                     <span className="text-yellow-400 font-black text-base">
-                      ₹{formatCurrency(Math.min(raiseAmount, maxRaise))}
+                      {formatCurrency(Math.min(raiseAmount, maxRaise))}
                     </span>
                   </div>
                   <input
