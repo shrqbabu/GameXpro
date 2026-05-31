@@ -9,7 +9,7 @@ import {
 } from '../../firebase/games';
 import CardDisplay from '../../components/games/CardDisplay';
 import { formatCurrency } from '../../utils/helpers';
-import { Loader2, LogOut } from 'lucifde-react';
+import { Loader2, LogOut } from 'lucide-react';
 
 // ─── Seat positions as % of the WRAPPER (not the felt) ─────────────────────
 // These match exactly where players sit — empty seats use identical positions
