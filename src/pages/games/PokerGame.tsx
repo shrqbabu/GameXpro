@@ -2,11 +2,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import {
-  subscribePokerTable, startPokerHand, pokerAction,
-  leavePokerTable, checkAndAutoStart, buyInAtTable,
-  PokerTable, PokerPlayer,
-} from '../../firebase/games';
 import CardDisplay from '../../components/games/CardDisplay';
 import { formatCurrency } from '../../utils/helpers';
 import { Loader2, LogOut, Wallet } from 'lucide-react';
