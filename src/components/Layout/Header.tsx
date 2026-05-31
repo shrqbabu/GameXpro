@@ -19,7 +19,7 @@ const pageTitles: Record<string, string> = {
   '/notifications': 'Notifications',
   '/games/color-prediction': 'Color Prediction',
   '/matchmaking': 'Card Battle',
-  '/games/dice': 'Dice Game',
+  '/games/dice': '🎲 Dice Game',
   '/admin': 'Admin Dashboard',
 };
 
