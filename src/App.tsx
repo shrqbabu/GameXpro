@@ -66,8 +66,10 @@ export default function App() {
                 <Route path="/game-room/:roomId" element={<GameRoom />} />
                 <Route path="/games/poker" element={<PokerLobbyPage />} />
                 <Route path="/games/andar-bahar" element={<AndarBaharPage />} />
+                <Route path="/games/dice" element={<DiceGame />} />
                 <Route path="/games/color-prediction" element={<ColorPrediction />} />
 
+                
                 {/* Admin routes */}
                 <Route element={<AdminRoute />}>
                   <Route path="/admin" element={<AdminDashboard />} />
@@ -75,7 +77,6 @@ export default function App() {
               </Route>
 
               {/* Game pages — WITHOUT MainLayout (no Header/Sidebar) */}
-              <Route path="/games/dice" element={<DiceGame />} />
               <Route path="/games/dragon-tiger" element={<DragonTigerPage />} />
               <Route path="/games/poker/:tableId" element={<PokerGamePage />} />
             </Route>
