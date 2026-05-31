@@ -5,7 +5,6 @@ import { Toaster } from 'react-hot-toast';
 import { AuthProvider } from './context/AuthContext';
 import { ProtectedRoute, AdminRoute, PublicRoute } from './components/ProtectedRoute';
 import { MainLayout } from './components/Layout/MainLayout';
-import GameHeader from './components/games/GameHeader';
 
 import DragonTigerPage from './pages/games/DragonTiger';
 import AndarBaharPage from './pages/games/AndarBahar';
@@ -66,6 +65,8 @@ export default function App() {
                 <Route path="/matchmaking" element={<Matchmaking />} />
                 <Route path="/game-room/:roomId" element={<GameRoom />} />
                 <Route path="/games/poker" element={<PokerLobbyPage />} />
+                <Route path="/games/andar-bahar" element={<AndarBaharPage />} />
+                <Route path="/games/color-prediction" element={<ColorPrediction />} />
 
                 {/* Admin routes */}
                 <Route element={<AdminRoute />}>
@@ -74,10 +75,8 @@ export default function App() {
               </Route>
 
               {/* Game pages — WITHOUT MainLayout (no Header/Sidebar) */}
-              <Route path="/games/color-prediction" element={<ColorPrediction />} />
               <Route path="/games/dice" element={<DiceGame />} />
               <Route path="/games/dragon-tiger" element={<DragonTigerPage />} />
-              <Route path="/games/andar-bahar" element={<AndarBaharPage />} />
               <Route path="/games/poker/:tableId" element={<PokerGamePage />} />
             </Route>
 
