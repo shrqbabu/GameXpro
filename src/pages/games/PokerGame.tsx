@@ -552,8 +552,8 @@ const PokerGamePage: React.FC = () => {
         <div
           className="relative"
           style={{
-            width:  'min(98vw, 520px)',
-            height: 'min(68vh, 500px)',
+           width: 'min(92vw, 460px)',
+               aspectRatio: '1 / 1',
             // overflow must be visible so avatar heads above top edge show
             overflow: 'visible',
           }}
@@ -563,11 +563,11 @@ const PokerGamePage: React.FC = () => {
           <div
             className="absolute"
             style={{
-              top:    '5%',
-              bottom: '2%',
-              left:   '2%',
-              right:  '5%',
-              borderRadius: '40%',
+              top:    '6%',
+              bottom: '6%',
+              left:   '6%',
+              right:  '6%',
+              borderRadius: '30%',
               background:
                 'radial-gradient(ellipse at 50% 38%,' +
                 '#2a9a5a 0%,#1a7a40 45%,#0f5a28 80%,#082010 100%)',
