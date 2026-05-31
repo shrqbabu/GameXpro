@@ -37,10 +37,10 @@ const valueDisplay: Record<string, string> = {
 };
 
 const sizeClasses = {
-  xs: 'w-[44px] h-[60px] text-xs',
-  sm: 'w-[52px] h-[70px] text-sm',
-  md: 'w-[60px] h-[80px] text-base',
-  lg: 'w-[68px] h-[90px] text-lg',
+  xs: 'w-[32px] h-[44px] text-[10px]',
+  sm: 'w-[40px] h-[56px] text-xs',
+  md: 'w-[50px] h-[70px] text-sm',
+  lg: 'w-[60px] h-[84px] text-base',
 };
 
 export const CardDisplay: React.FC<CardDisplayProps> = ({
