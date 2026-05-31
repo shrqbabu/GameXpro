@@ -72,36 +72,6 @@ const gameCards = [
     border: 'border-purple-500/20',
     emoji: '♠️',
   },
-  {
-    path: '/games/color-prediction',
-    title: 'Color Prediction',
-    desc: 'Predict Red, Green, or Violet',
-    icon: Palette,
-    gradient: 'from-red-500 via-green-500 to-violet-500',
-    bg: 'from-red-900/30 to-violet-900/30',
-    border: 'border-red-500/20',
-    emoji: '🎨',
-  },
-  {
-    path: '/matchmaking',
-    title: 'Card Battle',
-    desc: '2-Player card comparison game',
-    icon: Spade,
-    gradient: 'from-blue-500 to-indigo-500',
-    bg: 'from-blue-900/30 to-indigo-900/30',
-    border: 'border-blue-500/20',
-    emoji: '🃏',
-  },
-  {
-    path: '/games/dice',
-    title: 'Dice Game',
-    desc: 'Roll 3D dice - Odd or Even',
-    icon: Dice5,
-    gradient: 'from-green-500 to-emerald-500',
-    bg: 'from-green-900/30 to-emerald-900/30',
-    border: 'border-green-500/20',
-    emoji: '🎲',
-  },
 ];
 
 const quickActions = [
