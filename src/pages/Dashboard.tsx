@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Wallet, TrendingUp, Trophy, Star, Dice5, Spade, Palette,
-  PlusCircle, ArrowUpCircle, Users, Bell, ChevronRight,
+  PlusCircle, Swords, ArrowUpCircle, Users, Bell, ChevronRight,
   Zap, Crown,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
