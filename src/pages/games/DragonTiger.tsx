@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import GameTimer from '../../components/games/GameTimer';
 import { useAuth } from '../../context/AuthContext';
 import {
   subscribeLatestDragonTiger,
