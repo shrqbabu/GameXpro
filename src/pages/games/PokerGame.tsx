@@ -153,6 +153,39 @@ const PlayerSeat: React.FC<{
           {player.name.charAt(0).toUpperCase()}
         </div>
 
+        {/*
+        {showCards && isBottom && (
+  <>
+    <div
+      className="absolute -top-6 left-1 z-30"
+      style={{
+        transform: 'rotate(-8deg)',
+      }}
+    >
+      <AnimatedCard
+        card={showFaceUp ? player.holeCards[0] : undefined}
+        faceDown={!showFaceUp}
+        size="xs"
+        animate={dealAnimating}
+      />
+    </div>
+
+    <div
+      className="absolute -top-6 left-5 z-40"
+      style={{
+        transform: 'rotate(8deg)',
+      }}
+    >
+      <AnimatedCard
+        card={showFaceUp ? player.holeCards[1] : undefined}
+        faceDown={!showFaceUp}
+        size="xs"
+        animate={dealAnimating}
+      />
+    </div>
+  </>
+)}
+
         {/* Dealer chip */}
         {player.isDealer && (
           <span
@@ -225,20 +258,7 @@ const PlayerSeat: React.FC<{
       )}
 
       {/* ── Cards BELOW avatar (bottom / You seat) ── */}
-      {showCards && isBottom && (
-        <div className="flex gap-1 mt-1" style={{ zIndex: 30 }}>
-          {player.holeCards.map((c, i) => (
-            <AnimatedCard
-              key={i}
-              card={showFaceUp ? c : undefined}
-              faceDown={!showFaceUp}
-              size="sm"
-              animate={dealAnimating}
-              delay={cardDealIndex * 200 + i * 120}
-            />
-          ))}
-        </div>
-      )}
+      
     </div>
   );
 };
