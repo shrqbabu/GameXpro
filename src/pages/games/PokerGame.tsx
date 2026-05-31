@@ -14,12 +14,12 @@ import { Loader2, LogOut } from 'lucide-react';
 // ─── Seat positions as % of the WRAPPER (not the felt) ─────────────────────
 // These match exactly where players sit — empty seats use identical positions
 const SEAT_POSITIONS: Record<number, React.CSSProperties> = {
-  0: { bottom: '0%',   left: '50%',  transform: 'translateX(-50%)' },   // bottom center (You)
-  1: { top: '50%',     right: '0%',  transform: 'translateY(-50%)' },   // right middle
-  2: { top: '8%',      right: '8%'  },                                   // top right
-  3: { top: '0%',      left: '50%',  transform: 'translateX(-50%)' },   // top center
-  4: { top: '8%',      left: '8%'  },                                    // top left
-  5: { top: '50%',     left: '0%',  transform: 'translateY(-50%)' },    // left middle
+  0: { bottom: '2%', left: '50%', transform: 'translateX(-50%)' },   // bottom center (You)
+  1: { bottom: '24%',     right: '2%',  transform: 'translateY(-50%)' },   // right middle
+  2: { top: '10%',      right: '18%'  },                                   // top right
+  3: { top: '2%',      left: '50%',  transform: 'translateX(-50%)' },   // top center
+  4: { top: '10%',      left: '18%'  },                                    // top left
+  5: { bottom: '24%',     left: '2%', },    // left middle
 };
 
 // ─── Animated Card Component ────────────────────────────────────────────────
@@ -97,7 +97,7 @@ const PlayerSeat: React.FC<{
 
       {/* ── Cards ABOVE avatar (non-bottom seats) ── */}
       {showCards && !isBottom && (
-        <div className="flex gap-0.5 mb-0.5" style={{ zIndex: 30 }}>
+        <div className="flex gap-1 mb-2" style={{ zIndex: 30, transform: 'translateY(-4px)',}}>
           {player.holeCards.map((c, i) => (
             <AnimatedCard
               key={i}
@@ -680,39 +680,36 @@ const PokerGamePage: React.FC = () => {
 
               We pre-calculate these for the 6 standard positions.
             */}
-            {emptySeats.map(seatIdx => {
               // Map wrapper seat positions → felt-relative positions
-              const FELT_EMPTY_POSITIONS: Record<
+              emptySeats.map(seatIdx => {
+              { const FELT_EMPTY_POSITIONS: Record<
                 number, React.CSSProperties
               > = {
                 0: {
-                  bottom: '5%',
+                  bottom: '8%',
                   left: '50%',
                   transform: 'translateX(-50%)',
                 },
                 1: {
-                  top: '50%',
-                  right: '5%',
-                  transform: 'translateY(-50%)',
+                  bottom: '24%',
+                  right: '4%',
                 },
-                2: { top: '14%', right: '14%' },
+                2: { top: '12%', right: '18%' },
                 3: {
-                  top: '5%',
+                  top: '4%',
                   left: '50%',
-                  transform: 'translateX(-50%)',
                 },
                 4: { top: '14%', left: '14%' },
                 5: {
-                  top: '50%',
-                  left: '5%',
-                  transform: 'translateY(-50%)',
+                  bottom: '24%',
+                  left: '4%',
                 },
               };
               return (
                 <div
                   key={`empty-${seatIdx}`}
                   className="absolute flex flex-col items-center gap-1"
-                  style={{ ...FELT_EMPTY_POSITIONS[seatIdx], zIndex: 4 }}
+                  style={FELT_EMPTY_POSITIONS[seatIdx]}
                 >
                   <div
                     className="w-9 h-9 md:w-11 md:h-11 rounded-full border-2
