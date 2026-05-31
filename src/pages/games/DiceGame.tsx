@@ -332,12 +332,6 @@ export const DiceGame: React.FC = () => {
         animate={{ opacity: 1, y: 0 }}
         className="text-center pt-2"
       >
-        <h2 className="text-2xl font-bold text-white flex items-center justify-center gap-2">
-          <span>🎲</span> Dice Game
-        </h2>
-        <p className="text-gray-400 text-sm mt-0.5">
-          Roll 2 dice — predict Odd or Even sum
-        </p>
       </motion.div>
 
       {/* Phase banner */}
