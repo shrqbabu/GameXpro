@@ -179,7 +179,7 @@ const PlayerSeat: React.FC<{
           {isMe ? 'You' : player.name}
         </p>
         <p className="text-yellow-400 text-[11px] font-semibold leading-tight">
-          {formatCurrency(player.chips)}
+          ₹{formatCurrency(player.chips)}
         </p>
       </div>
 
