@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Trophy, Clock, Users, Zap, History } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { MainLayout } from '../../layouts/MainLayout';
+
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { toast } from '../../components/ui/Toast';
