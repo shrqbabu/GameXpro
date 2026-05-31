@@ -682,28 +682,13 @@ const PokerGamePage: React.FC = () => {
             */}
               // Map wrapper seat positions → felt-relative positions
              {emptySeats.map(seatIdx => {
-              { const FELT_EMPTY_POSITIONS: Record<
-                number, React.CSSProperties
-            > = {
-                0: {
-                  bottom: '8%',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                },
-                1: {
-                  bottom: '24%',
-                  right: '4%',
-                },
-                2: { top: '12%', right: '18%' },
-                3: {
-                  top: '4%',
-                  left: '50%',
-                },
-                4: { top: '14%', left: '14%' },
-                5: {
-                  bottom: '24%',
-                  left: '4%',
-                },
+              { const FELT_EMPTY_POSITIONS: Record< number, React.CSSProperties> = {
+                0: { bottom: '8%', left: '50%', transform: 'translateX(-50%)',},
+                1: { bottom: '24%', right: '4%', },
+                2: { top: '12%', right: '18%', },
+                3: { top: '4%', left: '50%',},
+                4: { top: '14%', left: '14%', },
+                5: { bottom: '24%', left: '4%', },
               };
               return (
                 <div
