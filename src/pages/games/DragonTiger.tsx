@@ -10,7 +10,6 @@ import {
 } from '../../firebase/games';
 import CardDisplay from '../../components/games/CardDisplay';
 import { useNavigate } from "react-router-dom";
-import GameTimer from '../../components/games/GameTimer';
 import { formatCurrency, calculateUsableBalance } from '../../utils/helpers';
 import {
   Users, History, Loader2, AlertCircle,
