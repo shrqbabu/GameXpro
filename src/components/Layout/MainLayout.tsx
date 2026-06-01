@@ -13,7 +13,7 @@ export const MainLayout: React.FC = () => {
 
 const hideHeader =
   /^\/games\/poker\/[^/]+$/.test(location.pathname) ||
-  location.pathname === "/games/dragon-tiger";
+  
 
 
   useEffect(() => {
