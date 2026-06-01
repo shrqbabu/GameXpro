@@ -26,8 +26,8 @@ import { Notifications } from './pages/Notifications';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { Matchmaking } from './pages/Matchmaking';
 import { GameRoom } from './pages/GameRoom';
-import { ColorPrediction } from './pages/games/ColorPrediction';
-import { DiceGame } from './pages/games/DiceGame';
+
+
 
 const queryClient = new QueryClient({
   defaultOptions: {
